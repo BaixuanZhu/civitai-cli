@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/11-22-command-help/prd.md", "reason": "Verify every AC1-AC8: dual entry, stdout/exit 0, section order, no-hang, literal-word escape, integration assertions"}
+{"file": ".trellis/tasks/11-22-command-help/design.md", "reason": "Check implementation against frozen D1-D8 contracts incl. shared global block (no per-command copies) and D6 file ownership"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Gate: go vet, offline go test, integration script coverage for the new help surface"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Confirm help output goes to stdout only; stderr stays empty on help paths"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirm unknown-flag path unchanged (exit 1) and default flag dump suppressed"}

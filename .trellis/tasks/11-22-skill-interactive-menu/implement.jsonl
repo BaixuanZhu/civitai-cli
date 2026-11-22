@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/11-22-skill-interactive-menu/prd.md", "reason": "Requirements R1-R8 and acceptance criteria AC1-AC7 for the arrow-key menus and Proceed removal"}
+{"file": ".trellis/tasks/11-22-skill-interactive-menu/design.md", "reason": "Frozen mechanism D1-D7: internal/console leaf, SelectMulti/SelectOne API, VT raw-mode syscalls, pure decode/render cores, skill.go integration and fallback"}
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "Consumer-side seam pattern: cmd owns wording/fallback, console stays generic; leaf package rules"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where internal/console goes; hand-written syscall precedent is internal/env/path_windows.go; zero internal imports for leaves"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero deps (no x/term), all-English, GoDoc on exported symbols, offline table-driven tests, integration-test mandate for CLI surface changes"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Menus render on stderr (prompt class), results stay stdout; no log interleave during raw mode"}

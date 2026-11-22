@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/11-22-command-help/prd.md", "reason": "Requirements R1-R9 and acceptance criteria AC1-AC8 define the help surface contract"}
+{"file": ".trellis/tasks/11-22-command-help/design.md", "reason": "Frozen mechanism D1-D8: runner signature, bare-help predicate, page layout, shared global block, file ownership split, test strategy"}
+{"file": ".trellis/tasks/11-22-command-help/implement.md", "reason": "Wave order A0 -> A1||B -> C -> D with gates and rollback points"}
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "New-subcommand recipe and seam conventions the execute runner change must follow"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where help.go goes, dependency direction, main-routes-only rule for the upgrade help routing"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero deps, all-English, GoDoc on exported symbols, offline table-driven tests, integration-test mandate for CLI surface changes"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stdout-is-results discipline: help on stdout must not interleave with stderr logs"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exit codes 0/1 mapping: help exits 0, unknown flag stays exit 1 via app.Fail"}
