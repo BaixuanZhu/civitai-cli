@@ -12,7 +12,7 @@ routes. The layering is one-directional and interfaces/seams are defined at the
 consumer, so each layer is testable in isolation against `httptest` servers and
 fixtures (no external network in unit tests).
 
-Design contract: `.trellis/tasks/11-22-civitai-cli-go/design.md` (§1, D1–D9).
+Design contract: `.trellis/tasks/archive/2026-11/11-22-civitai-cli-go/design.md` (§1, D1–D9).
 
 ---
 
