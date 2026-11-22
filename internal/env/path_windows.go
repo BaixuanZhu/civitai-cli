@@ -186,6 +186,26 @@ func containsEntry(userPath, dir string) bool {
 	return false
 }
 
+// removePathEntry removes every entry equal to dir (case-insensitive, matched
+// after path normalization, tolerating trailing separator differences) from a
+// PATH string, preserving the order of the remaining entries. Empty entries are
+// dropped by splitPathEntries. Returns the rebuilt PATH and whether any entry
+// was removed. Pure function, for table-driven tests.
+func removePathEntry(userPath, dir string) (string, bool) {
+	want := strings.ToLower(filepath.Clean(dir))
+	entries := splitPathEntries(userPath)
+	kept := make([]string, 0, len(entries))
+	removed := false
+	for _, e := range entries {
+		if strings.ToLower(filepath.Clean(e)) == want {
+			removed = true
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return strings.Join(kept, ";"), removed
+}
+
 // EnsureUserPath ensures the directory containing civ.exe is in the user PATH.
 // Called on every startup (gated by app.BootstrapEnabled): resolves the exe
 // directory via os.Executable(), and appends + persists it if missing. Injected
@@ -219,6 +239,32 @@ func EnsureUserPath() error {
 	newPath := exeDir
 	if strings.TrimSpace(userPath) != "" {
 		newPath = userPath + ";" + exeDir
+	}
+	return Persist("PATH", newPath)
+}
+
+// RemoveUserPath removes the directory containing civ.exe from the user PATH.
+// It is the inverse of EnsureUserPath, invoked by the uninstaller (through the
+// internal "unbootstrap" command) before the exe is deleted so uninstall leaves
+// no dead PATH entry. Idempotent: an absent entry is a no-op. Like EnsureUserPath
+// it returns an error rather than exiting, so the caller can warn and continue.
+func RemoveUserPath() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to locate the current exe: %w", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	userPath, err := readUserEnv("PATH")
+	if err != nil {
+		if errors.Is(err, syscall.ERROR_FILE_NOT_FOUND) {
+			return nil // no PATH value at all; nothing to remove
+		}
+		return fmt.Errorf("failed to read user PATH: %w", err)
+	}
+	newPath, changed := removePathEntry(userPath, exeDir)
+	if !changed {
+		return nil // already absent
 	}
 	return Persist("PATH", newPath)
 }

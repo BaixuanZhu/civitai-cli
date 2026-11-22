@@ -227,7 +227,7 @@ try {
         Write-Info '  4. Optional API token for personal queries: set CIVITAI_API_KEY (or run civ login)'
         Write-Info ''
         Write-Info "Upgrade later: civ upgrade"
-        Write-Info 'Uninstall: delete the install dir, then remove it from the user PATH if desired.'
+        Write-Info 'Uninstall: run "civ unbootstrap" to remove the dir from the user PATH, then delete the install dir.'
         Write-Info '          The cache (%LOCALAPPDATA%\civ) and config (%APPDATA%\civ, holds your token) are safe to delete too.'
     } finally {
         # Clean up the temp dir (on both success and failure).

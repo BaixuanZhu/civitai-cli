@@ -92,9 +92,10 @@ SHA-256 where a checksum manifest is available.
 3. Open a **new** terminal and run `civ version`.
 
 Uninstall via Windows *Add/Remove Programs* or the Start Menu shortcut
-(*civitai-cli > Uninstall civitai-cli*). The uninstaller removes the exe, any
-leftover `.bak`, the registry entries, the cache (`%LOCALAPPDATA%\civ`), and the
-config/token (`%APPDATA%\civ`).
+(*civitai-cli > Uninstall civitai-cli*). The uninstaller first removes the install
+directory from your user `PATH` (via `civ.exe unbootstrap`), then deletes the exe,
+any leftover `.bak`, the registry entries, the cache (`%LOCALAPPDATA%\civ`), and
+the config/token (`%APPDATA%\civ`).
 
 > The installer stub is x86 and runs under emulation on ARM64 Windows, while
 > dropping the native ARM64 `civ.exe`.

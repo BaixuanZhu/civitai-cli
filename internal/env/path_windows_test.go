@@ -93,3 +93,35 @@ func TestContainsEntry(t *testing.T) {
 		})
 	}
 }
+
+func TestRemovePathEntry(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		dir         string
+		want        string
+		wantRemoved bool
+	}{
+		{"empty PATH", "", `C:\x`, "", false},
+		{"middle entry", `C:\a;C:\x;C:\b`, `C:\x`, `C:\a;C:\b`, true},
+		{"first entry", `C:\x;C:\b`, `C:\x`, `C:\b`, true},
+		{"last entry", `C:\a;C:\x`, `C:\x`, `C:\a`, true},
+		{"only entry", `C:\x`, `C:\x`, "", true},
+		{"case-insensitive", `C:\A;C:\X`, `c:\x`, `C:\A`, true},
+		{"trailing separator on entry", `C:\a;C:\x\;C:\b`, `C:\x`, `C:\a;C:\b`, true},
+		{"trailing separator on dir", `C:\a;C:\x`, `C:\x\`, `C:\a`, true},
+		{"no hit leaves unchanged", `C:\a;C:\b`, `C:\x`, `C:\a;C:\b`, false},
+		{"same prefix different dir", `C:\x-other;C:\b`, `C:\x`, `C:\x-other;C:\b`, false},
+		{"duplicate entries all removed", `C:\x;C:\a;C:\x`, `C:\x`, `C:\a`, true},
+		{"drops empty entries when removing", `C:\a;;C:\x;`, `C:\x`, `C:\a`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, removed := removePathEntry(tt.path, tt.dir)
+			if got != tt.want || removed != tt.wantRemoved {
+				t.Errorf("removePathEntry(%q, %q) = (%q, %v), want (%q, %v)", tt.path, tt.dir, got, removed, tt.want, tt.wantRemoved)
+			}
+		})
+	}
+}

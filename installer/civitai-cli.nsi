@@ -12,7 +12,8 @@
 ;   - Environment config (PATH) is delegated to civ.exe itself, which silently
 ;     registers its own directory into the user PATH on every startup
 ;     (env.EnsureUserPath, idempotent). The installer just drops the exe and
-;     runs it once.
+;     runs it once. The uninstaller runs "civ.exe unbootstrap" to remove the
+;     directory again (env.RemoveUserPath) before deleting the exe.
 ;   - The installer stub itself is x86; on ARM64 Windows it runs under the
 ;     built-in x86 emulation, while the exe it drops is the native
 ;     ${APP_ARCH} build.
@@ -111,6 +112,12 @@ SectionEnd
 
 ; ---------- Uninstaller ----------
 Section "Uninstall"
+  ; Remove the install directory from the user PATH while civ.exe still exists:
+  ; delegate to the exe's reverse-bootstrap (env.RemoveUserPath via the internal
+  ; "unbootstrap" command), mirroring how install delegates PATH registration to
+  ; the exe. nsExec waits for completion, so the exe is free to delete afterwards.
+  nsExec::ExecToLog '"$INSTDIR\civ.exe" unbootstrap'
+
   ; Files (".bak" is left behind by a self-upgrade that could not delete the
   ; old exe while its process was still running)
   Delete "$INSTDIR\civ.exe"

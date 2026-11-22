@@ -26,7 +26,11 @@ func main() {
 	// (release builds only) register the exe directory into the user PATH.
 	// Dev builds inject Bootstrap=off and CIV_NO_BOOTSTRAP disables it anywhere.
 	upgrade.CleanupStaleBak()
-	if app.BootstrapEnabled() {
+	// "unbootstrap" is the uninstaller's reverse-bootstrap (it removes the exe
+	// dir from PATH), so skip the startup add for it rather than re-registering
+	// the directory right before removing it.
+	unbootstrap := len(os.Args) >= 2 && os.Args[1] == "unbootstrap"
+	if !unbootstrap && app.BootstrapEnabled() {
 		if err := env.EnsureUserPath(); err != nil {
 			log.Printf("[WARN] PATH bootstrap failed: %v", err)
 		}
@@ -58,6 +62,13 @@ func main() {
 		cmd.Skill(os.Args[2:])
 	case "upgrade":
 		upgrade.Run()
+	case "unbootstrap":
+		// Internal maintenance hook invoked by the uninstaller (not listed in
+		// usage): remove this exe's directory from the user PATH.
+		if err := env.RemoveUserPath(); err != nil {
+			log.Printf("[WARN] PATH removal failed: %v", err)
+			os.Exit(1)
+		}
 	case "version", "-v", "--version":
 		fmt.Println("civ", app.Version)
 	case "help", "-h", "--help":
