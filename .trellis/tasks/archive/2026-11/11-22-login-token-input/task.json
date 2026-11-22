@@ -1,0 +1,28 @@
+{
+  "id": "login-token-input",
+  "name": "login-token-input",
+  "title": "civ login one-line token input",
+  "description": "Support one-line login via --key/-t flag and positional token (keep stdin fallback); fix config.Save to load-modify-save so login preserves other config fields (e.g. proxy).",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-22",
+  "completedAt": "2026-11-22",
+  "branch": "feat/login-token-input",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "status": "completed"
+  }
+}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines index: conventions overview for the Go CLI"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "cmd layer rules: run*+execute pattern, register func for command flags"}
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "P4 contracts: exit codes 0-4, stdout-only-results; new-flag extensibility recipe"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "login exit-code overrides (401->4, network->2) and usage-error mapping"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "stdlib-only, all-English, offline httptest, table-driven test conventions"}
