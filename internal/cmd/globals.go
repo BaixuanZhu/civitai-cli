@@ -26,6 +26,7 @@ import (
 type globals struct {
 	JSON    bool
 	Token   string
+	Proxy   string
 	Timeout time.Duration
 	Verbose bool
 
@@ -37,6 +38,7 @@ type globals struct {
 func registerGlobalFlags(fs *flag.FlagSet, g *globals) {
 	fs.BoolVar(&g.JSON, "json", false, "machine-readable output (human decoration off)")
 	fs.StringVar(&g.Token, "token", "", "API token; overrides CIVITAI_API_KEY (anonymous by default)")
+	fs.StringVar(&g.Proxy, "proxy", "", "proxy URL for this invocation; overrides the saved proxy and HTTP(S)_PROXY")
 	fs.DurationVar(&g.Timeout, "timeout", 30*time.Second, "per-request HTTP timeout")
 	fs.BoolVar(&g.Verbose, "verbose", false, "verbose [INFO]/[DEBUG] logging to stderr")
 }
@@ -58,13 +60,34 @@ func (g *globals) stdout() io.Writer {
 	return os.Stdout
 }
 
+// clientOptions returns the api options shared by every client factory:
+// the resolved token, the per-request timeout, and the effective proxy
+// (config.ResolveProxy applies --proxy flag > saved config; empty falls
+// back to env/direct, invalid warns and degrades — task 11-22 design
+// D2/D6). With --verbose a debug line names the effective proxy and its
+// source (flag or config) so ad-hoc --proxy overrides are observable on
+// data commands (prd R6). newAPIClient and newSyncClient both build on it
+// so the two factory seams cannot drift apart.
+func clientOptions(g *globals) []api.Option {
+	proxyURL := config.ResolveProxy(g.Proxy)
+	if proxyURL != "" {
+		source := "config"
+		if strings.TrimSpace(g.Proxy) != "" {
+			source = "flag"
+		}
+		app.Debugf("proxy: routing through %s (source: %s)", proxyURL, source)
+	}
+	return []api.Option{
+		api.WithToken(g.resolveToken()),
+		api.WithTimeout(g.Timeout),
+		api.WithProxy(proxyURL),
+	}
+}
+
 // newAPIClient is the client factory used by all commands. Tests replace
 // it to point the same command code at an httptest server.
 var newAPIClient = func(g *globals) *api.Client {
-	return api.NewClient(
-		api.WithToken(g.resolveToken()),
-		api.WithTimeout(g.Timeout),
-	)
+	return api.NewClient(clientOptions(g)...)
 }
 
 // execute is the shared command runner: parse flags, apply verbose mode,

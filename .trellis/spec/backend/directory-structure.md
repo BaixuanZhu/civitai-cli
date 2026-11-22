@@ -49,9 +49,11 @@ civitai-cli/
 │   ├── cmd/                # command handlers: flag parse -> api -> report -> exit code
 │   │   ├── globals.go      #   globals, registerGlobalFlags, execute/executeWithExitCode,
 │   │   │                   #   exitCodeFor, printErrorHint, permuteArgs, newAPIClient seam
-│   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go
-│   ├── config/             # leaf: token persistence + priority resolution
-│   │   └── config.go       #   Path/Load/Save/Delete/ResolveToken
+│   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
+│   ├── config/             # leaf: token + proxy persistence, priority resolution
+│   │   └── config.go       #   Path/Load/Save/Delete/ResolveToken/ResolveProxy
+│   ├── proxy/              # leaf: outbound proxy validate/resolve/transport
+│   │   └── proxy.go        #   Validate/Resolve/NewTransport (stdlib net/http + net/url only)
 │   ├── hashcache/          # leaf: streaming SHA256 + size/mtime cache
 │   │   ├── cache.go        #   ComputeSHA256 (M2)
 │   │   └── store.go        #   Cache Load/Get/Put/Save (M3)
@@ -83,9 +85,11 @@ main.go (dispatch + global-flag assembly + startup maintenance)
        ├─ internal/api       (Client.Get choke point + endpoint methods + types + errors)
        ├─ internal/report    (tabwriter / JSON / k-M / date / truncate / console width)
        ├─ internal/hashcache (ComputeSHA256 + Cache)
-       ├─ internal/config    (token read/write + ResolveToken)
+       ├─ internal/config    (token/proxy read/write + ResolveToken/ResolveProxy)
+       ├─ internal/proxy     (outbound proxy: Validate/Resolve/NewTransport)
        └─ internal/skill     (bundled civ-prompt Skill: embed + install/remove/update)
-  infrastructure: internal/app (leaf), internal/env (leaf), internal/upgrade, internal/skill (leaf)
+  infrastructure: internal/app (leaf), internal/proxy (leaf), internal/env (leaf),
+                  internal/upgrade (deps: app + config + proxy)
 ```
 
 - `internal/app` is a **leaf**: it imports nothing from `internal/`, so `api`,
@@ -93,12 +97,21 @@ main.go (dispatch + global-flag assembly + startup maintenance)
   import cycle. It holds `Version`, `Fail`, `UserAgent`, the leveled logger, and
   the `Bootstrap` gate.
 - `internal/env`, `internal/report`, `internal/hashcache`, `internal/config`,
-  `internal/skill` are leaves (or depend only on `app`). `env` is Windows-only
+  `internal/skill`, and `internal/proxy` are leaves (or depend only on other
+  leaves: `config` imports `app` + `proxy`). `proxy` owns outbound proxy
+  validation (`Validate`), precedence (`Resolve`), and transport construction
+  (`NewTransport`) using only stdlib `net/http` + `net/url` — zero internal
+  imports — so `api`, `cmd`, `config`, and `upgrade` reuse it without cycles;
+  `config.Proxy` / `config.ResolveProxy` mirror the token field/resolver.
+  `env` is Windows-only
   (`path_windows.go` suffix gates compilation) and uses hand-written `syscall`
   (no `golang.org/x/sys`) to keep the zero-dependency contract. `skill` embeds
   its `assets/civ-prompt` tree via `go:embed` and does pure file operations
   (hand-written frontmatter version extraction, no YAML library).
-- `internal/upgrade` depends on `app` only; `main` calls `upgrade.Run()` for the
+- `internal/upgrade` depends on `app`, `config`, and `proxy` — it applies
+  `config.ResolveProxy("")` to its one shared download client via
+  `proxy.NewTransport` (the upgrade→GitHub call is the accepted exception to
+  the `Client.Get` choke point); `main` calls `upgrade.Run()` for the
   `upgrade` command and `upgrade.CleanupStaleBak()` at startup.
 
 ### Interfaces / seams at the consumer
@@ -113,6 +126,11 @@ var newAPIClient = func(g *globals) *api.Client { ... }   // tests replace this
 var newSyncClient = func(g *globals, concurrency int) *api.Client { ... }
 var computeHash = hashcache.ComputeSHA256                  // tests wrap to count calls
 ```
+
+Both client factories build their shared options (token + timeout + proxy)
+through one `clientOptions(g)` helper, so the proxy resolved by
+`config.ResolveProxy(g.Proxy)` cannot drift between the single-shot and sync
+paths.
 
 Command logic lives in **pure `run*` functions** that return `error` and never
 call `os.Exit`; the shared `execute`/`executeWithExitCode` runner owns flag
@@ -136,7 +154,8 @@ exit-code and rendering behavior table-testable offline.
 | CLI->API enum mapping | `internal/api/enums.go` | pinned tables + "verified live" comment |
 | Rendering primitive | `internal/report` | no API knowledge |
 | Cross-cutting infra | `internal/app` | leaf, no `internal/` imports |
-| Token persistence | `internal/config` | leaf; `cmd` calls `ResolveToken` at the seam |
+| Token / proxy persistence | `internal/config` | leaf (imports `app` + `proxy`); `Config.Proxy` + `ResolveProxy` mirror the token pattern; `cmd` calls `ResolveToken`/`ResolveProxy` at the seams |
+| Outbound proxy URL | `internal/proxy` | leaf, stdlib `net/http`+`net/url` only; owns `Validate`/`Resolve`/`NewTransport`; `api`/`upgrade` install transports via `NewTransport`, `cmd`/`config` resolve precedence via `Resolve` |
 | Bundled Skill management | `internal/skill` | leaf; `go:embed` source in `assets/`; pure file ops + `ConflictFunc` callback; `cmd/skill` owns interactive/flag UX |
 
 ---

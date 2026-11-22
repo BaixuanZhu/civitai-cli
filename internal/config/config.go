@@ -1,10 +1,13 @@
-// Package config persists the civ API token and resolves the token
-// priority chain. The config file lives at os.UserConfigDir()/civ/config.json
-// (%AppData%\civ on Windows) and holds {"token":"..."}; writes use 0600
-// semantics (best-effort on Windows). It is a leaf package: the cmd layer
-// calls ResolveToken at the M1 token-resolution seam and login/logout call
-// Save/Delete. Token priority is --token flag > CIVITAI_API_KEY > config file
-// (parent design D8).
+// Package config persists the civ API token and proxy URL and resolves
+// their priority chains. The config file lives at os.UserConfigDir()/civ/config.json
+// (%AppData%\civ on Windows) and holds {"token":"...","proxy":"..."};
+// writes use 0600 semantics (best-effort on Windows). It stays at the leaf
+// level (imports only the app and proxy leaves): the cmd layer calls
+// ResolveToken at the M1 token-resolution seam and ResolveProxy for
+// outbound proxying; login/logout call Save/Delete. Token priority is
+// --token flag > CIVITAI_API_KEY > config file (parent design D8); proxy
+// priority is --proxy flag > config file, with environment proxies applying
+// only when neither is set (task 11-22 design D2).
 package config
 
 import (
@@ -14,12 +17,16 @@ import (
 	"path/filepath"
 
 	"civitai-cli/internal/app"
+	"civitai-cli/internal/proxy"
 )
 
-// Config is the persisted civ configuration. Only the API token is stored
-// in v1; the struct leaves room for future keys without a schema break.
+// Config is the persisted civ configuration. It stores the API token and,
+// since proxy support, the optional outbound proxy URL. The schema is
+// additive: token-only files from earlier versions decode with an empty
+// Proxy and need no migration (task 11-22 design §2).
 type Config struct {
 	Token string `json:"token"`
+	Proxy string `json:"proxy"`
 }
 
 // Path returns the config file location, os.UserConfigDir()/civ/config.json.
@@ -129,4 +136,16 @@ func ResolveToken(flagToken string) string {
 	}
 	c, _ := Load()
 	return c.Token
+}
+
+// ResolveProxy implements the explicit-proxy precedence chain: a flagProxy
+// that is non-empty after trimming wins, else the saved config proxy
+// (delegated to proxy.Resolve). An empty result means "no explicit proxy" —
+// callers keep a nil Transport so HTTP_PROXY/HTTPS_PROXY still apply via
+// http.DefaultTransport. Load failures degrade to "" rather than erroring,
+// mirroring ResolveToken, so proxy resolution never blocks a command
+// (task 11-22 design D2).
+func ResolveProxy(flagProxy string) string {
+	c, _ := Load()
+	return proxy.Resolve(flagProxy, c.Proxy)
 }

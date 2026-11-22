@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"civitai-cli/internal/app"
+	"civitai-cli/internal/proxy"
 )
 
 // Client behavior constants (parent design D2).
@@ -67,6 +69,31 @@ func WithTimeout(d time.Duration) Option {
 		if d > 0 {
 			c.httpClient.Timeout = d
 		}
+	}
+}
+
+// WithProxy routes all outbound requests through the proxy at rawURL by
+// installing a proxy.NewTransport clone of http.DefaultTransport as the
+// client's Transport. An empty or whitespace-only rawURL is a no-op — the
+// client keeps its nil Transport, so http.DefaultTransport keeps applying
+// HTTP_PROXY/HTTPS_PROXY/NO_PROXY exactly as before (design D2) — and an
+// invalid rawURL degrades the same way with a [WARN] instead of failing
+// the client (design D6). Ordering: WithProxy sets the Transport on the
+// http.Client as it stands when the option runs, so pass WithHTTPClient
+// BEFORE WithProxy when combining them (otherwise the Transport lands on
+// the default client that WithHTTPClient then replaces); WithTimeout is
+// independent of this option.
+func WithProxy(rawURL string) Option {
+	return func(c *Client) {
+		if strings.TrimSpace(rawURL) == "" {
+			return
+		}
+		tr, err := proxy.NewTransport(rawURL)
+		if err != nil {
+			app.Warnf("invalid proxy %q (%v); falling back to env/direct", rawURL, err)
+			return
+		}
+		c.httpClient.Transport = tr
 	}
 }
 

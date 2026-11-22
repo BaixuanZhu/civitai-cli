@@ -131,6 +131,32 @@ run_stdin login_keydash_bad "invalid_integration_token" login --key -
 run login_multi  login a b
 run login_empty  login --key ""
 
+# --- proxy subcommand (isolated config; pure local file ops) ---
+# Config state is snapshotted per step so assertions see each phase exactly;
+# the section ends by removing the config again (unset keeps the file), which
+# restores the no-config end state the login checks above rely on.
+# search_proxy_bad proves the --proxy flag actually routes traffic: a dead
+# local port refuses the connection fast -> network error -> exit 2.
+CFG="$ISO/appdata/civ/config.json"
+# snap_cfg <label>: copy the isolated config for the python assertions
+# (an empty snapshot file means "no config.json at that point").
+snap_cfg() {
+  if [ -f "$CFG" ]; then cp "$CFG" "$WORK/$1.json"; else : > "$WORK/$1.json"; fi
+}
+run proxy_status_none  proxy
+run proxy_set_bad      proxy set not-a-url
+snap_cfg proxy_after_setbad
+run proxy_set          proxy set http://127.0.0.1:7890
+snap_cfg proxy_after_set
+run proxy_get          proxy get
+run proxy_get_json     proxy get --json
+run proxy_unset        proxy unset
+snap_cfg proxy_after_unset
+run proxy_unset_again  proxy unset
+run proxy_usage        proxy set
+run search_proxy_bad   search anima --limit 1 --proxy http://127.0.0.1:9
+rm -f "$CFG"
+
 # --- skill subcommand (isolated home; pure local file ops) ---
 # Install all three (claude+codex left installed for filesystem assertions;
 # zcode removed to prove remove). --json captures paths/actions.
@@ -307,6 +333,43 @@ check(exit_of('login_empty') == 1
       'login --key "": exit 1 (empty candidate)')
 check(not os.path.exists(cfg),
       'login usage errors: no config.json written')
+
+# proxy subcommand: local lifecycle (config snapshotted per step; the bash
+# section restores the no-config end state the login checks rely on)
+def cfg_snap(label):
+    with open(os.path.join(WORK, label + '.json'), encoding='utf-8') as fh:
+        body = fh.read().strip()
+    return json.loads(body) if body else None
+
+check(exit_of('proxy_status_none') == 0,
+      'bare civ proxy: exit 0 (status; source is env-dependent)')
+check(exit_of('proxy_set_bad') == 1,
+      'proxy set not-a-url: exit 1 (validation, no save)')
+check(cfg_snap('proxy_after_setbad') is None,
+      'proxy set bad URL: no config.json written')
+check(exit_of('proxy_set') == 0
+      and cfg_snap('proxy_after_set') is not None
+      and cfg_snap('proxy_after_set').get('proxy') == 'http://127.0.0.1:7890',
+      'proxy set: exit 0, value persisted to config.json')
+check(exit_of('proxy_get') == 0
+      and 'http://127.0.0.1:7890' in out_of('proxy_get')
+      and 'Source: config' in out_of('proxy_get'),
+      'proxy get: exit 0, reports persisted value (source: config)')
+gj = json_of('proxy_get_json')
+check(exit_of('proxy_get_json') == 0 and isinstance(gj, dict)
+      and gj.get('persisted') == 'http://127.0.0.1:7890'
+      and gj.get('source') == 'config',
+      'proxy get --json: {persisted, effective, source} shape')
+snap = cfg_snap('proxy_after_unset')
+check(exit_of('proxy_unset') == 0 and snap is not None
+      and snap.get('proxy', '') == '' and snap.get('token', '') == '',
+      'proxy unset: exit 0, proxy cleared, token untouched, file kept')
+check(exit_of('proxy_unset_again') == 0,
+      'proxy unset: idempotent (second unset exit 0)')
+check(exit_of('proxy_usage') == 1,
+      'proxy set (no URL): exit 1 (usage error)')
+check(exit_of('search_proxy_bad') == 2,
+      'search --proxy <dead port>: exit 2 (request routed through the flag proxy)')
 
 # skill install: three platforms, JSON results, correct native roots
 si = json_of('skill_install')

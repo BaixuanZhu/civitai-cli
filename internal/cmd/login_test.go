@@ -146,15 +146,14 @@ func TestLogin_SuccessSavesConfig(t *testing.T) {
 
 // TestLogin_LoadModifySavePreservesConfig pins the load-modify-save flow:
 // login rewrites only the token of the loaded config instead of writing a
-// fresh Config. Config currently has just the token field, so the sibling
-// preservation guarantee (e.g. the planned proxy setting surviving a
-// login) becomes observable once config gains a second field; today the
-// test asserts the modify-over-existing-file path.
+// fresh Config, so sibling fields — a proxy saved via civ proxy set —
+// survive a login (cross-feature promise of the login and proxy tasks,
+// observable since config gained the Proxy field).
 func TestLogin_LoadModifySavePreservesConfig(t *testing.T) {
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"items":[],"metadata":{}}`))
 	})
-	if err := config.Save(config.Config{Token: "old-key"}); err != nil {
+	if err := config.Save(config.Config{Token: "old-key", Proxy: "http://127.0.0.1:7890"}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
 	if err := runLoginCmd(t, env, strings.NewReader(""), "--key", "new-key"); err != nil {
@@ -166,6 +165,9 @@ func TestLogin_LoadModifySavePreservesConfig(t *testing.T) {
 	}
 	if c.Token != "new-key" {
 		t.Errorf("login must replace the saved token via load-modify-save, got %q", c.Token)
+	}
+	if c.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("login must preserve the saved proxy, got %q", c.Proxy)
 	}
 }
 

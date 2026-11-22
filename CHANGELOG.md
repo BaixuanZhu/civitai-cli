@@ -20,6 +20,22 @@ awk extraction — do not change it casually.
   for a history-safe one-liner. Saving is load-modify-save, so other config
   fields survive a login; empty or whitespace candidates exit 1 before any
   probe or save. Help and README document the history-exposure tradeoff.
+- Proxy support: `civ proxy set <url>` validates and persists an outbound
+  proxy (`http` / `https` / `socks5` / `socks5h`, non-empty `host:port`) to
+  the config file next to the token; `civ proxy get` (or bare `civ proxy`)
+  reports the persisted and effective proxy plus its source, with `--json`;
+  `civ proxy unset` clears it idempotently while preserving the token.
+  Malformed `set` input exits 1 without saving.
+- `--proxy <url>` global flag overrides the saved proxy for a single
+  invocation on every API command. Precedence: `--proxy` flag > saved config >
+  `HTTP_PROXY`/`HTTPS_PROXY` (env keeps applying unchanged when nothing
+  explicit is set). The resolved proxy covers all civ outbound traffic,
+  including `civ upgrade` (GitHub release check and asset download — upgrade
+  honors the saved config proxy and env but does not parse the `--proxy`
+  flag). With an explicit proxy, `NO_PROXY` is not consulted (civ targets
+  exactly civitai.com and github.com). A persisted proxy that fails
+  validation at runtime warns and degrades to env/direct instead of failing
+  the command.
 
 ## [0.1.1] - 2026-11-22
 

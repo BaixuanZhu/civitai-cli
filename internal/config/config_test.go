@@ -193,3 +193,95 @@ func TestResolveToken_Priority(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveProxy_Priority(t *testing.T) {
+	cases := []struct {
+		name        string
+		flag        string
+		configProxy string
+		corrupt     bool
+		want        string
+	}{
+		{"flag wins over persisted", "http://127.0.0.1:7890", "http://10.0.0.1:8080", false, "http://127.0.0.1:7890"},
+		{"empty flag falls back to persisted", "", "http://10.0.0.1:8080", false, "http://10.0.0.1:8080"},
+		{"missing config file yields empty (env/direct)", "", "", false, ""},
+		{"both empty yields empty", "", "", false, ""},
+		{"whitespace flag falls through to persisted", "   ", "socks5://127.0.0.1:1080", false, "socks5://127.0.0.1:1080"},
+		{"whitespace flag with no config yields empty", " \t ", "", false, ""},
+		{"corrupt config file degrades to empty", "", "http://10.0.0.1:8080", true, ""},
+		{"flag still wins over corrupt config", "http://127.0.0.1:7890", "http://10.0.0.1:8080", true, "http://127.0.0.1:7890"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setConfigDir(t, t.TempDir())
+			if tc.corrupt {
+				if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.WriteFile(Path(), []byte("{not json"), 0o600); err != nil {
+					t.Fatalf("write corrupt: %v", err)
+				}
+			} else if tc.configProxy != "" {
+				if err := Save(Config{Token: "tok", Proxy: tc.configProxy}); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+			}
+			// captureLog keeps the corrupt-case app.Warnf out of test output
+			// (ResolveProxy swallows Load errors by contract).
+			var got string
+			logs := captureLog(t, func() { got = ResolveProxy(tc.flag) })
+			if got != tc.want {
+				t.Errorf("ResolveProxy(%q) = %q, want %q", tc.flag, got, tc.want)
+			}
+			if tc.corrupt && !strings.Contains(logs, "corrupt") {
+				t.Errorf("corrupt config must warn on stderr, logs: %s", logs)
+			}
+		})
+	}
+}
+
+// TestLoad_TokenOnlyFileDecodesEmptyProxy pins the additive-schema contract:
+// a config written before proxy support (token only) decodes with an empty
+// Proxy — no migration needed (task 11-22 design §2).
+func TestLoad_TokenOnlyFileDecodesEmptyProxy(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(Path(), []byte(`{"token":"secret-key"}`), 0o600); err != nil {
+		t.Fatalf("write token-only config: %v", err)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Token != "secret-key" {
+		t.Errorf("token = %q, want secret-key", c.Token)
+	}
+	if c.Proxy != "" {
+		t.Errorf("token-only file must decode Proxy as empty, got %q", c.Proxy)
+	}
+}
+
+// TestSaveLoadRoundTripProxy asserts the proxy key round-trips alongside
+// the token with the documented JSON shape.
+func TestSaveLoadRoundTripProxy(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	if err := Save(Config{Token: "secret-key", Proxy: "http://127.0.0.1:7890"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	b, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("config file must exist after Save: %v", err)
+	}
+	if !strings.Contains(string(b), `"proxy"`) || !strings.Contains(string(b), "http://127.0.0.1:7890") {
+		t.Errorf("config file shape unexpected: %s", b)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Token != "secret-key" || c.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("round-trip = {Token: %q, Proxy: %q}, want both preserved", c.Token, c.Proxy)
+	}
+}

@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"civitai-cli/internal/app"
+	"civitai-cli/internal/config"
+	"civitai-cli/internal/proxy"
 )
 
 // githubRepo is the GitHub repository publishing civitai-cli (owner/repo format).
@@ -39,8 +41,12 @@ const githubRepo = "BaixuanZhu/civitai-cli"
 // exeName is the agreed executable file name inside the zip (matches BINARY in the Makefile).
 const exeName = "civ.exe"
 
-// downloadClient downloads release assets without an overall timeout:
-// timeout control is left to the transfer itself so slow networks don't kill large downloads.
+// downloadClient is the single HTTP client for all upgrade traffic — the
+// GitHub API release check (fetchLatestRelease) and the release asset
+// downloads — without an overall timeout: timeout control is left to the
+// transfer itself so slow networks don't kill large downloads. Its Transport
+// stays nil (environment proxies apply via http.DefaultTransport) until
+// applyPersistedProxy installs the saved proxy at Run time.
 var downloadClient = &http.Client{Timeout: 0}
 
 // githubRelease mirrors the GitHub API releases/latest response (only the needed fields).
@@ -61,10 +67,35 @@ func expectedAssetName() string {
 	return fmt.Sprintf("civitai-cli-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
 }
 
+// applyPersistedProxy installs the persisted config proxy (if any) as
+// downloadClient's Transport, so all upgrade traffic (the GitHub API call and
+// the asset download, unified onto downloadClient) routes through it.
+// Upgrade honors the saved proxy and environment proxies (nil Transport
+// fallback) but NOT the --proxy flag: upgrade bypasses the global flag runner,
+// so there is no flag value to consult (task 11-22 design D7). An invalid
+// saved value degrades — warn + nil Transport, never a failed upgrade —
+// mirroring config's corrupt-file philosophy.
+func applyPersistedProxy() {
+	p := config.ResolveProxy("")
+	if p == "" {
+		return // nothing persisted: keep nil Transport (env proxies via DefaultTransport)
+	}
+	tr, err := proxy.NewTransport(p)
+	if err != nil {
+		app.Warnf("invalid saved proxy %q (%v); falling back to environment/direct", p, err)
+		return
+	}
+	downloadClient.Transport = tr
+}
+
 // Run checks for and installs the latest version. It never returns on a fatal
 // error (app.Fail prints to stderr and exits 1); on success or "already current"
 // it returns normally so main can exit 0.
 func Run() {
+	// Upgrade applies the persisted config proxy + env, but not the --proxy
+	// flag (D7: upgrade bypasses the global flag runner).
+	applyPersistedProxy()
+
 	fmt.Printf("Checking the latest release of %s...\n", githubRepo)
 	rel, err := fetchLatestRelease()
 	if err != nil {
@@ -148,7 +179,9 @@ func Run() {
 	fmt.Println("   The new version takes effect on next launch.")
 }
 
-// fetchLatestRelease calls the GitHub API for the latest release.
+// fetchLatestRelease calls the GitHub API for the latest release. It rides
+// downloadClient (not http.DefaultClient) so the persisted proxy applies to
+// this call too and upgrade traffic stays on one client.
 func fetchLatestRelease() (*githubRelease, error) {
 	u := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
@@ -158,7 +191,7 @@ func fetchLatestRelease() (*githubRelease, error) {
 	req.Header.Set("User-Agent", app.UserAgent())
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

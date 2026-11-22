@@ -2,6 +2,8 @@ package upgrade
 
 import (
 	"archive/zip"
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"civitai-cli/internal/config"
 )
 
 func TestParseChecksum(t *testing.T) {
@@ -248,5 +252,101 @@ func TestDownloadOnce_Non200(t *testing.T) {
 	err := downloadOnce(srv.URL, dest)
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("expected 404 error, got: %v", err)
+	}
+}
+
+// setConfigDir points os.UserConfigDir at dir for the duration of the test so
+// applyPersistedProxy reads a config file the test controls, never a real
+// user profile. Windows resolves the config dir from %AppData%; Unix from
+// $XDG_CONFIG_HOME (mirrors internal/config's isolation helper).
+func setConfigDir(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("AppData", dir)
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", dir)
+	}
+}
+
+// isolateDownloadClient clears downloadClient's Transport before the test and
+// restores the cleared state afterwards, so tests mutating the shared client
+// never leak transport state into each other.
+func isolateDownloadClient(t *testing.T) {
+	t.Helper()
+	downloadClient.Transport = nil
+	t.Cleanup(func() { downloadClient.Transport = nil })
+}
+
+// proxyURLOf returns the URL tr's Proxy function resolves to ("" when nil).
+func proxyURLOf(t *testing.T, tr *http.Transport) string {
+	t.Helper()
+	u, err := tr.Proxy(&http.Request{})
+	if err != nil {
+		t.Fatalf("Transport.Proxy() error: %v", err)
+	}
+	if u == nil {
+		return ""
+	}
+	return u.String()
+}
+
+func TestApplyPersistedProxy_SetsTransport(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	isolateDownloadClient(t)
+
+	const proxyURL = "http://127.0.0.1:7890"
+	if err := config.Save(config.Config{Proxy: proxyURL}); err != nil {
+		t.Fatal(err)
+	}
+
+	applyPersistedProxy()
+
+	tr, ok := downloadClient.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("downloadClient.Transport = %T, want *http.Transport", downloadClient.Transport)
+	}
+	if got := proxyURLOf(t, tr); got != proxyURL {
+		t.Errorf("Transport.Proxy = %q, want %q", got, proxyURL)
+	}
+}
+
+func TestApplyPersistedProxy_NoProxyKeepsNilTransport(t *testing.T) {
+	setConfigDir(t, t.TempDir()) // empty dir: no config file
+	isolateDownloadClient(t)
+
+	applyPersistedProxy()
+
+	if downloadClient.Transport != nil {
+		t.Errorf("downloadClient.Transport = %T, want nil (env proxies via DefaultTransport)", downloadClient.Transport)
+	}
+}
+
+// TestApplyPersistedProxy_InvalidSavedValueDegrades pins the degrade path: a
+// hand-edited config can hold an invalid proxy (config.Save does not
+// validate; validation happens at `civ proxy set`), and the apply step must
+// warn and keep the nil Transport instead of failing the upgrade.
+func TestApplyPersistedProxy_InvalidSavedValueDegrades(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	isolateDownloadClient(t)
+
+	if err := config.Save(config.Config{Proxy: "ftp://127.0.0.1:21"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// captureLog redirects the standard logger (app.Warnf writes to it).
+	var buf bytes.Buffer
+	old := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(old); log.SetFlags(oldFlags) })
+
+	applyPersistedProxy() // must not panic
+
+	if downloadClient.Transport != nil {
+		t.Errorf("downloadClient.Transport = %T, want nil after invalid saved proxy", downloadClient.Transport)
+	}
+	if !strings.Contains(buf.String(), "[WARN]") {
+		t.Errorf("expected a [WARN] degrade line on stderr, got log %q", buf.String())
 	}
 }

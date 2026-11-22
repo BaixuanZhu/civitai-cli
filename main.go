@@ -3,7 +3,8 @@
 //
 // main only routes: each subcommand lives in internal/cmd and owns its flag
 // set, API calls, rendering, and exit-code mapping. Global flags (--json,
-// --token, --timeout, --verbose) are accepted after the command name only.
+// --token, --proxy, --timeout, --verbose) are accepted after the command
+// name only.
 package main
 
 import (
@@ -58,6 +59,8 @@ func main() {
 		cmd.Login(os.Args[2:])
 	case "logout":
 		cmd.Logout(os.Args[2:])
+	case "proxy":
+		cmd.Proxy(os.Args[2:])
 	case "skill":
 		cmd.Skill(os.Args[2:])
 	case "upgrade":
@@ -95,6 +98,7 @@ Commands:
   tags <query>     Tag name completion (--limit)
   login [key]      Save an API token: --key/-t <key>, one positional <key>, --token, or a stdin prompt
   logout           Remove the saved API token
+  proxy <action>   Save/show/clear the outbound proxy (set/get/unset; bare = status)
   skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
   upgrade          Self-update from the latest GitHub Release
   version          Print the civ version
@@ -103,6 +107,7 @@ Commands:
 Global flags (after the command name):
   --json           Machine-readable output (human decoration off)
   --token <key>    API token; overrides CIVITAI_API_KEY and the saved config (anonymous by default)
+  --proxy <url>    Outbound proxy for this invocation; overrides the saved proxy and HTTP(S)_PROXY
   --timeout <dur>  Per-request HTTP timeout (default 30s)
   --verbose        Verbose [INFO]/[DEBUG] logging to stderr
 
@@ -112,6 +117,13 @@ Login:
   typed on the command line is exposed via shell history and the process
   list; prefer piping (echo "$KEY" | civ login) or civ login --key - (both
   read the key from stdin, never echoed) when that matters.
+
+Proxy:
+  civ proxy set <url> persists (http/https/socks5/socks5h), get/unset show or
+  clear it, and bare civ proxy prints the status. Precedence: --proxy flag >
+  saved config > HTTP_PROXY/HTTPS_PROXY env; env (and NO_PROXY) apply only
+  when nothing explicit is set. civ upgrade honors the saved proxy and env,
+  but not the --proxy flag.
 
 Environment:
   CIVITAI_API_KEY  API token (below --token, above the saved config)

@@ -53,7 +53,7 @@ civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.l
 ## Features
 
 - **Core commands** — `search`, `show`, `vet`, `sync`, `tags`, `login`/`logout`,
-  and `skill` — plus `upgrade`, `version`, and `help`.
+  `proxy`, and `skill` — plus `upgrade`, `version`, and `help`.
 - **Vetting flagship** — `vet` accepts a file path, a 64-char SHA256, or a
   10-char AutoV2; `sync` batch-audits a directory with a size/mtime hash cache,
   duplicate detection, and CSV/JSON/table output.
@@ -70,6 +70,9 @@ civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.l
   one static `civ.exe`; no runtime, no installer required for the portable zip.
 - **Anonymous by default** — optional token via `--token`, `CIVITAI_API_KEY`,
   or `civ login`; stable exit codes and `--json` contracts for scripting.
+- **Blocked-network friendly** — route every outbound request through an
+  HTTP/HTTPS/SOCKS5 proxy: persisted with `civ proxy set`, per-invocation with
+  `--proxy`, or the standard `HTTP(S)_PROXY` environment variables.
 - **Reproducible builds** — pinned Go toolchain, trimmed paths, deterministic
   zip, SHA-256 checksums, keyless build-provenance attestation, and a CI
   cross-rebuild verification job.
@@ -158,6 +161,7 @@ Global flags are accepted **after the command name** only:
 |---|---|---|
 | `--json` | off | Machine-readable output; all human decoration is turned off. |
 | `--token <key>` | empty | API token; overrides `CIVITAI_API_KEY` and the saved config. Anonymous by default. |
+| `--proxy <url>` | empty | Outbound proxy URL (`http://`, `https://`, `socks5://`, or `socks5h://`); overrides the saved proxy and `HTTP(S)_PROXY` for this invocation. |
 | `--timeout <dur>` | `30s` | Per-request HTTP timeout (Go duration, e.g. `10s`, `1m`). |
 | `--verbose` | off | Verbose `[INFO]`/`[DEBUG]` logging to **stderr**. |
 
@@ -299,6 +303,61 @@ your shell history and visible in the process list; prefer
 `echo "$KEY" | civ login` or `civ login --key -` when that matters.
 `logout` deletes the config file and exits `0` even when no key was saved.
 
+### `civ proxy <set|get|unset>` — outbound proxy
+
+```bash
+civ proxy set http://127.0.0.1:7890    # validate + persist next to the token
+civ proxy get                          # persisted + effective proxy and its source
+civ proxy                              # bare form: same status view as get
+civ proxy get --json                   # {"persisted":...,"effective":...,"source":...}
+civ proxy unset                        # clear the saved proxy (token preserved)
+civ search anima --proxy socks5://127.0.0.1:1080   # ad-hoc, this invocation only
+```
+
+Route civ's outbound HTTP through an HTTP, HTTPS, SOCKS5, or SOCKS5h proxy —
+for networks where a direct connection to civitai.com times out or fails DNS.
+`set` validates before anything is saved — the scheme must be `http`,
+`https`, `socks5`, or `socks5h` with a non-empty `host:port`; malformed input
+exits `1` and saves nothing. `unset` rewrites only the proxy field of the
+loaded config (idempotent), so the saved token survives. The proxy lives in
+the same `%APPDATA%\civ\config.json` as the token.
+
+**Proxy priority (highest first):**
+
+1. `--proxy <url>` flag
+2. Saved config file (`civ proxy set`)
+3. `HTTP_PROXY` / `HTTPS_PROXY` environment variables
+
+`--proxy` is a global flag and follows the standard placement rule — after
+the command name (`civ --proxy ... search` is a usage error). When neither
+the flag nor a saved proxy is set, behavior is exactly as before proxy
+support: the standard environment variables apply through Go's built-in
+transport, so existing `HTTP(S)_PROXY` users see no change.
+
+**Behind a blocked network with no saved proxy?** The environment-only
+workaround still works:
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890   # PowerShell: $env:HTTPS_PROXY = "http://127.0.0.1:7890"
+civ search anima --limit 5
+```
+
+`--json` on `get` emits `{"persisted":...,"effective":...,"source":...}`,
+where `source` names where the effective proxy comes from: `config`, `env`,
+or `direct`. A saved proxy that fails validation at runtime (for example, a
+hand-edited config) warns on stderr and traffic falls back to env/direct —
+it never fails a command.
+
+> **NO_PROXY note:** with an explicit `--proxy` flag or saved proxy,
+> `NO_PROXY` is **not** consulted — all civ outbound traffic (civitai.com,
+> plus github.com for `civ upgrade`) goes through that proxy. civ talks to
+> exactly these two hosts, so this is a deliberate tradeoff; `NO_PROXY` still
+> applies in the environment-only fallback.
+
+> **Upgrade note:** `civ upgrade` honors the saved config proxy and the
+> environment, but does not parse the `--proxy` flag. Run `civ proxy set`
+> once to upgrade through a proxy.
+
 ### `civ upgrade` — self-update
 
 ```bash
@@ -414,7 +473,9 @@ resources; it does not increase read capability.
 3. Saved config file (`civ login`)
 
 **Config file:** `os.UserConfigDir()/civ/config.json` — on Windows
-`%APPDATA%\civ\config.json` — holding `{"token":"..."}`. Writes use `0600`
+`%APPDATA%\civ\config.json` — holding `{"token":"...","proxy":"..."}` (the
+optional `proxy` key is written by `civ proxy set`; token-only files from
+earlier versions work unchanged). Writes use `0600`
 (owner-only) semantics, best-effort ACL on Windows, and are atomic
 (temp file + rename). A missing or corrupt config degrades to anonymous with a
 stderr warning; it never blocks a read command.

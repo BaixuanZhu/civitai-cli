@@ -36,14 +36,12 @@ const (
 var computeHash = hashcache.ComputeSHA256
 
 // newSyncClient builds the phase-2 API client with the requested
-// concurrency gate. Tests replace it to point at an httptest server,
-// mirroring the newAPIClient seam.
+// concurrency gate. It extends the shared clientOptions (token, timeout,
+// proxy) so sync applies the same resolved proxy as every other command;
+// only the concurrency option is sync-specific. Tests replace it to point
+// at an httptest server, mirroring the newAPIClient seam.
 var newSyncClient = func(g *globals, concurrency int) *api.Client {
-	return api.NewClient(
-		api.WithToken(g.resolveToken()),
-		api.WithTimeout(g.Timeout),
-		api.WithConcurrency(concurrency),
-	)
+	return api.NewClient(append(clientOptions(g), api.WithConcurrency(concurrency))...)
 }
 
 // syncOptions carries the sync-specific flags.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -401,5 +402,103 @@ func TestBackoffFor_JitterBoundsAndCap(t *testing.T) {
 	c.backoffs = []time.Duration{time.Minute}
 	if w := c.backoffFor(0, ""); w > maxRetryWait {
 		t.Errorf("backoff cap violated: %v", w)
+	}
+}
+
+// TestWithProxy_OptionWiring covers the construction-time paths: empty or
+// whitespace input is a no-op (nil Transport kept, env proxies still apply,
+// design D2), invalid input degrades to a warn + no-op (design D6), and a
+// valid URL installs a Transport. No dialing happens here.
+func TestWithProxy_OptionWiring(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantSet bool
+	}{
+		{"empty is a no-op", "", false},
+		{"whitespace is a no-op", " \t ", false},
+		{"invalid degrades to a no-op", "not a url", false},
+		{"valid installs a transport", "http://127.0.0.1:7890", true},
+	}
+	for _, tc := range cases {
+		c := NewClient(WithProxy(tc.raw))
+		if got := c.httpClient.Transport != nil; got != tc.wantSet {
+			t.Errorf("%s: transport set = %v, want %v", tc.name, got, tc.wantSet)
+		}
+	}
+}
+
+// TestWithProxy_RoutesThroughProxy proves the proxy wiring end to end: a
+// proxied Transport sends the request with an absolute-URI request line,
+// the mini forward proxy below records it and relays it, and the target
+// observes the hit. Fully offline (both endpoints are local httptest).
+func TestWithProxy_RoutesThroughProxy(t *testing.T) {
+	var targetHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits.Add(1)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	// Bare Transport for the proxy's forward hop so env proxies cannot
+	// influence the relay.
+	forward := &http.Transport{}
+	var proxySeen []string // absolute URIs the proxy received (single request, no lock needed)
+	proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxySeen = append(proxySeen, r.URL.String())
+		if !r.URL.IsAbs() {
+			http.Error(w, "proxy expected an absolute-URI request", http.StatusBadRequest)
+			return
+		}
+		resp, err := forward.RoundTrip(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	}))
+	defer proxySrv.Close()
+
+	c := newFastTestClient(target, WithProxy(proxySrv.URL))
+	body, err := c.Get(context.Background(), "/models", nil)
+	if err != nil {
+		t.Fatalf("Get through proxy: %v", err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Errorf("body = %s, want the target's response relayed by the proxy", body)
+	}
+	if got := targetHits.Load(); got != 1 {
+		t.Errorf("target hits = %d, want 1 (reached through the proxy, no retries)", got)
+	}
+	if len(proxySeen) != 1 {
+		t.Fatalf("proxy received %d requests, want 1", len(proxySeen))
+	}
+	if uri := proxySeen[0]; !strings.HasPrefix(uri, target.URL+"/") {
+		t.Errorf("proxy saw %q, want an absolute URI of the target %q", uri, target.URL)
+	}
+}
+
+// TestWithProxy_InvalidDegradesToDirect proves the degrade contract end to
+// end: an invalid proxy never fails the client — the Transport stays as it
+// was (nil here, so env/direct applies) and the request still succeeds.
+func TestWithProxy_InvalidDegradesToDirect(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{}`))
+	}))
+	defer target.Close()
+
+	c := newFastTestClient(target, WithProxy("not a url")) // warns, then no-ops
+	if c.httpClient.Transport != nil {
+		t.Errorf("invalid proxy must leave the Transport untouched, got %T", c.httpClient.Transport)
+	}
+	if _, err := c.Get(context.Background(), "/models", nil); err != nil {
+		t.Fatalf("Get after invalid proxy should fall back to direct: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("target hits = %d, want 1", hits.Load())
 	}
 }
