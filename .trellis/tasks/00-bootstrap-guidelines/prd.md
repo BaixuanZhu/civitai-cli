@@ -21,9 +21,9 @@ the rest conversationally.
 
 ## Status (update the checkboxes as you complete each item)
 
-- [ ] Fill backend guidelines
-- [ ] Fill frontend guidelines
-- [ ] Add code examples
+- [x] Fill backend guidelines (directory-structure / error-handling / logging / quality filled earlier; `design-principles.md` — high cohesion / low coupling / Go-style OO / extensibility recipes / maintainability — added 2026-11-22)
+- [x] Frontend guidelines — N/A: this repo is a Go CLI with no frontend; `spec/frontend/` marked not-applicable (delete the directory when convenient)
+- [x] Add code examples (all spec files reference real files under `internal/`)
 
 ---
 

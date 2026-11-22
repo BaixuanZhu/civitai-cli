@@ -1,39 +1,11 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project.
-
----
-
-## Overview
-
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
-
----
-
-## Guidelines Index
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
-
----
-
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+> **Not applicable.** `civitai-cli` is a Go CLI (`civ`) with no frontend — no
+> web UI, no TypeScript. `trellis init` scaffolded this directory for a
+> fullstack template; it does not apply here.
+>
+> All coding guidelines live in [../backend/](../backend/index.md) (Go CLI:
+> design principles, directory structure, error handling, logging, quality).
+>
+> This directory can be deleted safely (`rm -rf .trellis/spec/frontend`) —
+> no task manifest references it.
