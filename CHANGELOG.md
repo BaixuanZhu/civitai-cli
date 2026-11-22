@@ -9,7 +9,7 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-22
 
 ### Added
 
