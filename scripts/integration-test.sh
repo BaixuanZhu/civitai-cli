@@ -19,6 +19,8 @@
 #   - sync found/dupe and exit-code 2 (network) are covered by offline unit
 #     tests (httptest); a live runner has no registered model bytes to hash and
 #     no CLI base-url override to inject network faults, so they are not here.
+#   - unbootstrap (the internal PATH-removal hook) is never run: it mutates
+#     the real user PATH and is not part of the documented command surface.
 #   - upgrade is asserted graceful (exit 0/1, no panic) and run LAST: with no
 #     release it reports 404 (exit 1); after a release it may self-update the
 #     test exe, which is safe only because nothing runs after it.
@@ -114,6 +116,11 @@ run vet_badinput     vet DEADBEEF
 run sync             sync "$MODELS" --format csv
 run sync_json        sync "$MODELS" --json
 run usage_error      search anima --limit 101
+run help_cmd         help
+run unknown_cmd      definitely-not-a-command
+# --timeout flag plumbing: a 1ns deadline is always exceeded -> exit 2,
+# independent of civitai reachability (fails before the network matters).
+run search_timeout_bad  search anima --limit 1 --timeout 1ns
 
 # --- token management (isolated config; anonymous + invalid token) ---
 run logout           logout
@@ -150,6 +157,7 @@ run proxy_set          proxy set http://127.0.0.1:7890
 snap_cfg proxy_after_set
 run proxy_get          proxy get
 run proxy_get_json     proxy get --json
+run proxy_get_verbose  proxy get --verbose
 run proxy_unset        proxy unset
 snap_cfg proxy_after_unset
 run proxy_unset_again  proxy unset
@@ -292,6 +300,18 @@ check(exit_of('sync_json') == 0 and isinstance(sj, list) and len(sj) > 0
 check(exit_of('usage_error') == 1,
       'search --limit 101: exit 1 (CLI-side cap)')
 
+# help / unknown command: usage surface (offline)
+check(exit_of('help_cmd') == 0 and 'Usage:' in out_of('help_cmd')
+      and 'proxy' in out_of('help_cmd'),
+      'civ help: exit 0, usage printed, proxy listed')
+check(exit_of('unknown_cmd') == 1
+      and 'unknown command' in err_of('unknown_cmd'),
+      'unknown command: exit 1 (usage error)')
+
+# --timeout flag plumbing: 1ns deadline always exceeded -> exit 2
+check(exit_of('search_timeout_bad') == 2,
+      'search --timeout 1ns: exit 2 (deadline exceeded, flag applied)')
+
 # logout: idempotent, no saved key in isolated config -> exit 0
 check(exit_of('logout') == 0,
       'logout: exit 0 (idempotent, no saved key)')
@@ -360,6 +380,10 @@ check(exit_of('proxy_get_json') == 0 and isinstance(gj, dict)
       and gj.get('persisted') == 'http://127.0.0.1:7890'
       and gj.get('source') == 'config',
       'proxy get --json: {persisted, effective, source} shape')
+check(exit_of('proxy_get_verbose') == 0
+      and '[DEBUG]' in err_of('proxy_get_verbose')
+      and 'http://127.0.0.1:7890' in err_of('proxy_get_verbose'),
+      'proxy get --verbose: DEBUG line names the effective proxy')
 snap = cfg_snap('proxy_after_unset')
 check(exit_of('proxy_unset') == 0 and snap is not None
       and snap.get('proxy', '') == '' and snap.get('token', '') == '',
