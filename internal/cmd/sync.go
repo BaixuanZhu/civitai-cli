@@ -60,6 +60,32 @@ func (o *syncOptions) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.rehash, "rehash", false, "recompute every hash, ignoring cache hits")
 }
 
+// syncHelp is the curated `civ sync help` / `-h` page (without the shared
+// global block, which writeCommandHelp appends). Defaults mirror the
+// register() bindings and the behavior constants above; CIV_NO_CACHE is
+// documented here because the cache is sync-only surface.
+const syncHelp = `batch-audit a directory of model files against the registry
+
+Usage:
+  civ sync <dir> [flags]
+
+Options:
+  --ext <list>      Comma-separated file extensions to scan, leading dot
+                    optional (default .safetensors,.pt,.pth,.ckpt,.bin)
+  --format <f>      Output format: table, csv, json (the global --json is
+                    equivalent to --format json) (default table)
+  --concurrency <n> Parallel registry lookups, 1-8 (default 3)
+  --rehash          Recompute every hash, ignoring cache hits
+
+Examples:
+  civ sync I:\models\loras
+  civ sync D:\models --ext .safetensors --format csv
+  civ sync . --json > audit.json
+
+Environment:
+  CIV_NO_CACHE  Non-empty bypasses the sync hash cache (read and write)
+`
+
 // Sync runs the sync command: civ sync <dir>. It recursively scans a
 // directory for model files, hashes them (with a size/mtime cache), looks
 // each hash up in the Civitai registry, and prints an audit row per file.
@@ -67,7 +93,7 @@ func (o *syncOptions) register(fs *flag.FlagSet) {
 // data row, not an error), 2 on any network failure, 1 on a usage error.
 func Sync(args []string) {
 	var o syncOptions
-	execute("sync", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	execute("sync", syncHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runSync(ctx, g, pos, &o)
 	})
 }

@@ -13,6 +13,31 @@ import (
 	"civitai-cli/internal/report"
 )
 
+// proxyHelp is the curated `civ proxy help` / `-h` page (without the shared
+// global block, which writeCommandHelp appends): the action forms, accepted
+// schemes, the proxy precedence chain, and the --json shapes.
+const proxyHelp = `save, show, or clear the persisted outbound proxy
+
+Usage:
+  civ proxy [set <url> | get | unset]
+
+Examples:
+  civ proxy set http://127.0.0.1:7890
+  civ proxy set socks5h://127.0.0.1:1080
+  civ proxy
+  civ proxy unset
+
+Notes:
+  Bare civ proxy prints the same report as get: the persisted proxy, the
+  effective explicit proxy, and the source (config, env, or direct).
+  Accepted schemes are http, https, socks5, and socks5h with a host:port.
+  Data commands pick their proxy in this order: the global --proxy flag,
+  the saved config value, then HTTP_PROXY/HTTPS_PROXY. unset rewrites the
+  config file, so the saved token survives; a malformed URL exits 1 before
+  anything is written. --json: get prints {persisted, effective, source};
+  set and unset print {status, proxy, config} (proxy omitted on unset).
+`
+
 // Proxy runs the proxy command: civ proxy [set|get|unset]. It manages the
 // persisted outbound proxy URL: set validates before saving, get reports
 // the persisted value, the effective value, and the source, and unset
@@ -22,7 +47,7 @@ import (
 // Exit codes: 0 success, 1 usage error (unknown action, bad proxy URL, or
 // wrong argument count).
 func Proxy(args []string) {
-	execute("proxy", args, nil, runProxy)
+	execute("proxy", proxyHelp, args, nil, runProxy)
 }
 
 // runProxy is the pure proxy implementation (testable without os.Exit):

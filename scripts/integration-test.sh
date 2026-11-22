@@ -122,6 +122,23 @@ run unknown_cmd      definitely-not-a-command
 # independent of civitai reachability (fails before the network matters).
 run search_timeout_bad  search anima --limit 1 --timeout 1ns
 
+# --- per-command help pages (task 11-22: `civ <cmd> help` and `civ <cmd> -h`) ---
+# Both entry points are intercepted in the runner before any prompt, network
+# call, or config write, so these runs are offline-assertable; the only live
+# case below is search_help_me (the keyword is literal: "help me" is a real
+# query). upgrade's help tokens are routed by main (design D4) and asserted
+# here — distinct from the real self-update run that stays LAST.
+for c in search show vet sync tags login logout proxy skill upgrade; do
+  run "help_${c}_kw"   "$c" help
+  run "help_${c}_flag" "$c" -h
+done
+# login help with empty stdin: interception happens before the prompt, so a
+# regression to the interactive prompt would read the empty line and fail
+# the exit-0 assertion loudly instead of hanging (login_* convention).
+run_stdin help_login_stdin "" login help
+run search_help_me search help me
+run search_nope    search --nope
+
 # --- token management (isolated config; anonymous + invalid token) ---
 run logout           logout
 run_stdin login_bad  "invalid_integration_token" login
@@ -304,9 +321,63 @@ check(exit_of('usage_error') == 1,
 check(exit_of('help_cmd') == 0 and 'Usage:' in out_of('help_cmd')
       and 'proxy' in out_of('help_cmd'),
       'civ help: exit 0, usage printed, proxy listed')
+check('civ <command> help' in out_of('help_cmd'),
+      'civ help: contains the "Run civ <command> help" pointer (AC6)')
 check(exit_of('unknown_cmd') == 1
       and 'unknown command' in err_of('unknown_cmd'),
       'unknown command: exit 1 (usage error)')
+
+# per-command help pages (task 11-22, prd AC1/AC2): keyword and -h forms both
+# exit 0, print the page on stdout (non-empty, Usage: present), keep stderr
+# empty, and carry each command's signature content. Groups encode the
+# "either form is fine" alternatives (show: --ver or -v; vet: Exit codes: or 3).
+help_sigs = {
+    'search': [['--sort'], ['Examples:']],
+    'show': [['--ver', '-v']],
+    'vet': [['Exit codes:', '3']],
+    'sync': [['--concurrency']],
+    'tags': [['--limit']],
+    'login': [['--key']],
+    'logout': [['logout']],
+    'proxy': [['socks5']],
+    'skill': [['--platform']],
+    'upgrade': [['upgrade']],
+}
+for cmd, groups in help_sigs.items():
+    for form, token in (('kw', 'help'), ('flag', '-h')):
+        label = 'help_%s_%s' % (cmd, form)
+        out = out_of(label)
+        check(exit_of(label) == 0 and out.strip() != '' and 'Usage:' in out
+              and err_of(label) == '',
+              'civ %s %s: exit 0, page on stdout, stderr empty' % (cmd, token))
+    page = out_of('help_%s_kw' % cmd)
+    missing = [grp for grp in groups if not any(tok in page for tok in grp)]
+    check(not missing,
+          'civ %s help: signature content present (missing: %s)' % (cmd, missing))
+
+# login help with empty stdin: intercepted before the prompt -> exit 0
+# immediately, no prompt text on stderr (anti-hang, prd AC3).
+check(exit_of('help_login_stdin') == 0
+      and 'Usage:' in out_of('help_login_stdin')
+      and err_of('help_login_stdin') == '',
+      'civ login help (empty stdin): exit 0 without hanging, no prompt')
+
+# the keyword is literal-only: "help me" is a real (live) search query with
+# ordinary search output (prd AC4).
+check(exit_of('search_help_me') == 0 and out_of('search_help_me').strip() != '',
+      'civ search help me: live query, exit 0 with results on stdout')
+
+# unknown flag: exit 1, one-line error, Go default usage dump gone (AC5).
+check(exit_of('search_nope') == 1
+      and 'flag provided but not defined: -nope' in err_of('search_nope')
+      and 'Usage of search' not in err_of('search_nope'),
+      'civ search --nope: exit 1, one-line error, no default dump')
+
+# uniform section order on a rendered page (prd AC8).
+s = out_of('help_search_kw')
+check(0 <= s.find('Usage:') < s.find('Options:') < s.find('Examples:')
+      < s.find('Global flags'),
+      'civ search help: sections ordered Usage < Options < Examples < Global flags')
 
 # --timeout flag plumbing: 1ns deadline always exceeded -> exit 2
 check(exit_of('search_timeout_bad') == 2,

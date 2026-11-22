@@ -168,8 +168,23 @@ Global flags are accepted **after the command name** only:
 > **Design note D6 (`-v` conflict):** the global debug flag is `--verbose` with
 > **no short alias**. `show`'s `-v` / `--ver` carries *version* semantics
 > (`-v <versionId>`), so the two never collide. The bare `-v` / `--version`
-> aliases only exist for `civ version` (no command context), and `-h` / `--help`
-> for `civ help`.
+> aliases only exist for `civ version` (no command context); the bare `-h` /
+> `--help` prints the top-level `civ help`.
+
+### Getting help
+
+Every command ships a built-in help page with the full flag list, legal
+values, and examples — on **stdout**, exit code `0`:
+
+```bash
+civ search help       # same page as: civ search -h / civ search --help
+civ vet help
+civ sync help
+```
+
+The keyword is only intercepted when it is the *single* argument:
+`civ search help me` still searches the query "help me". `civ help` prints
+the command overview with a pointer to these pages.
 
 ### `civ search <query>` — find models
 
@@ -434,8 +449,11 @@ zcode's `.skills_store_lock.json`. Exit codes: `0` success, `1` usage error
 
 ```bash
 civ version    # aliases: civ -v, civ --version
-civ help       # aliases: civ -h, civ --help
+civ help       # aliases: civ -h, civ --help; lists commands and global flags
 ```
+
+Per-command help: `civ <command> help` or `civ <command> -h` (see
+[Getting help](#getting-help)).
 
 ---
 

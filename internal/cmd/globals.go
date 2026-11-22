@@ -91,34 +91,45 @@ var newAPIClient = func(g *globals) *api.Client {
 }
 
 // execute is the shared command runner: parse flags, apply verbose mode,
-// run the command, map any error to an exit code. register binds
+// run the command, map any error to an exit code. help is the command's
+// curated help page (task 11-22-command-help): it is printed to stdout with
+// exit 0 for both the -h/-help/--help flag and a bare "help" positional,
+// before any run work (prompt, network, config). register binds
 // command-specific flags before parsing; run receives the positional
 // arguments left after flags. Commands use the global exit-code and hint
 // mapping; vet overrides both via executeWithExitCode.
-func execute(name string, args []string, register func(*flag.FlagSet), run func(ctx context.Context, g *globals, pos []string) error) {
-	executeWithExitCode(name, args, register, run, exitCodeFor, printErrorHint)
+func execute(name string, help string, args []string, register func(*flag.FlagSet), run func(ctx context.Context, g *globals, pos []string) error) {
+	executeWithExitCode(name, help, args, register, run, exitCodeFor, printErrorHint)
 }
 
 // executeWithExitCode is execute with injectable exit-code and hint
-// mappers — the minimal command-level override mechanism. exitMap returns
-// the process exit code for err (hasToken reports whether a token was
-// resolved); hint prints actionable guidance to stderr after the error
-// line. vet passes vetExitCode/vetErrorHint so NotFoundError means exit 3
-// ("hash not registered") instead of the global usage-class exit 1;
+// mappers — the minimal command-level override mechanism. help is the
+// curated help page printed for -h/--help and a bare "help" positional
+// (stdout, exit 0); the Go default flag dump is suppressed for every path.
+// exitMap returns the process exit code for err (hasToken reports whether a
+// token was resolved); hint prints actionable guidance to stderr after the
+// error line. vet passes vetExitCode/vetErrorHint so NotFoundError means
+// exit 3 ("hash not registered") instead of the global usage-class exit 1;
 // search/show/tags keep the global semantics through execute.
-func executeWithExitCode(name string, args []string, register func(*flag.FlagSet), run func(ctx context.Context, g *globals, pos []string) error, exitMap func(error, bool) int, hint func(error, bool)) {
+func executeWithExitCode(name string, help string, args []string, register func(*flag.FlagSet), run func(ctx context.Context, g *globals, pos []string) error, exitMap func(error, bool) int, hint func(error, bool)) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {} // no default dump; curated help or app.Fail owns output
 	var g globals
 	registerGlobalFlags(fs, &g)
 	if register != nil {
 		register(fs)
 	}
 	if err := fs.Parse(permuteArgs(fs, args)); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			os.Exit(0) // -h/--help on a subcommand prints usage, exits 0
+		if errors.Is(err, flag.ErrHelp) { // -h / -help / --help
+			writeCommandHelp(os.Stdout, name, help)
+			os.Exit(0)
 		}
 		app.Fail(err) // usage-class failure, exit 1
+	}
+	if isBareHelp(fs.Args()) { // `civ <command> help`, before any run work
+		writeCommandHelp(os.Stdout, name, help)
+		os.Exit(0)
 	}
 	app.SetVerbose(g.Verbose)
 

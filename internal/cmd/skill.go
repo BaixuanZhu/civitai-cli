@@ -17,6 +17,38 @@ import (
 	"civitai-cli/internal/skill"
 )
 
+// skillHelp is the curated `civ skill help` / `-h` page (without the
+// shared global block, which writeCommandHelp appends): the actions, the
+// platform/scope/force flags, interactive mode, and the --json shape.
+const skillHelp = `install, remove, or update the bundled civ-prompt skill
+
+Usage:
+  civ skill <install|remove|update> [flags]
+
+Options:
+  --platform <list>  Target platforms: claude, zcode, codex (comma-separated)
+                     or all; omit for interactive selection
+  --scope <name>     Install scope: user (home directory) or project
+                     (current directory) (default user)
+  --force            Overwrite an existing skill without prompting
+
+Examples:
+  civ skill install
+  civ skill install --platform zcode --scope project
+  civ skill install --platform all --force
+  civ skill update --platform claude,zcode
+
+Notes:
+  Without --platform the command prompts on stderr and reads the choices
+  from stdin, with detected platforms preselected (Enter accepts them);
+  canceling the confirmation exits 1. Each platform gets its native skill
+  root: .claude/skills, .zcode/skills, or the shared .agents/skills for
+  codex. update rewrites only installed skills whose version differs from
+  the running one (use install for a fresh target). --json prints an array
+  of {platform, path, action} results. Local file operations only, no
+  network.
+`
+
 // Skill runs the skill command: civ skill <install|remove|update> [flags]. It
 // installs, removes, or updates the bundled civ-prompt Agent Skill across the
 // claude / zcode / codex platforms. With --platform it runs non-interactively;
@@ -26,7 +58,7 @@ import (
 // (unknown action, invalid platform/scope, or interactive cancel).
 func Skill(args []string) {
 	var o skillOptions
-	execute("skill", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	execute("skill", skillHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runSkill(ctx, g, pos, &o, os.Stdin)
 	})
 }

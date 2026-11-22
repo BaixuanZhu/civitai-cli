@@ -88,6 +88,43 @@ func applyPersistedProxy() {
 	downloadClient.Transport = tr
 }
 
+// Help returns the curated `civ upgrade help` page as a string (upgrade
+// has no flags of its own; the page documents behavior, exit codes, and
+// the .bak swap). main prints it for `civ upgrade help` / -h / --help and
+// returns exit 0; Run() behavior is unchanged.
+func Help() string {
+	return `civ upgrade - Self-update from the latest GitHub Release
+
+Usage:
+  civ upgrade
+
+What it does:
+  Checks the latest GitHub Release, compares it with the running version
+  (a local build newer than the release is never downgraded), downloads
+  the platform zip asset, verifies its SHA256 against the release's
+  checksums.txt (releases without one skip the check with a warning),
+  then extracts civ.exe and swaps it in. Windows cannot overwrite a
+  running exe, so the old exe is first renamed to civ.exe.bak; the .bak
+  is deleted immediately on success, or on the next startup if the old
+  process still holds it.
+
+Exit codes:
+  0 success or already up to date   1 check, download, verify, or replace failure
+
+Output:
+  Human-readable progress lines on stdout; --json does not apply (upgrade
+  bypasses the global flag runner, so there is no machine-output form).
+
+Proxy:
+  Honors the saved proxy (civ proxy set) and the HTTP(S)_PROXY/NO_PROXY
+  environment variables; the --proxy flag does not apply to upgrade.
+
+Examples:
+  civ upgrade
+  civ upgrade -h
+`
+}
+
 // Run checks for and installs the latest version. It never returns on a fatal
 // error (app.Fail prints to stderr and exits 1); on success or "already current"
 // it returns normally so main can exit 0.

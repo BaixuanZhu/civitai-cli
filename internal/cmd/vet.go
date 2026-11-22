@@ -16,6 +16,28 @@ import (
 	"civitai-cli/internal/report"
 )
 
+// vetHelp is the curated `civ vet help` / `-h` page (without the shared
+// global block, which writeCommandHelp appends). Its Exit codes section is
+// vet-specific semantics: scripts key on exit 3 (hash not registered) to
+// tell an unregistered file apart from usage/network/token failures.
+const vetHelp = `audit a local file or hash against the Civitai registry
+
+Usage:
+  civ vet <path|sha256|autov2> [flags]
+
+Options:
+  --prompts        Append example-image generation recipes (prompt,
+                   negative prompt, steps, cfgScale, sampler, scheduler)
+
+Examples:
+  civ vet ./models/loras/foo.safetensors
+  civ vet FBA11953276B57EDF59D1DC4F1857AC05AA079C56F982B4D7C20298D57D3F7EB
+  civ vet FBA1195327 --prompts --json
+
+Exit codes:
+  0 hit   1 usage error   2 network failure   3 hash not registered   4 token rejected
+`
+
 // Vet runs the vet command: civ vet <path|sha256|autov2>. It looks the
 // hash up in the Civitai registry (by-hash endpoint) and prints a review
 // report: model/version/creator header, trigger words, files with full
@@ -25,7 +47,7 @@ import (
 // generation recipes (M3).
 func Vet(args []string) {
 	var o vetOptions
-	executeWithExitCode("vet", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	executeWithExitCode("vet", vetHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runVet(ctx, g, pos, &o)
 	}, vetExitCode, vetErrorHint)
 }

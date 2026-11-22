@@ -21,11 +21,27 @@ func (o *tagsOptions) register(fs *flag.FlagSet) {
 	fs.IntVar(&o.limit, "limit", 20, "max tag names (1-100)")
 }
 
+// tagsHelp is the curated `civ tags help` / `-h` page (without the shared
+// global block, which writeCommandHelp appends).
+const tagsHelp = `tag-name completion for prompt engineering
+
+Usage:
+  civ tags <query> [flags]
+
+Options:
+  --limit <n>      Max tag names, 1-100 (default 20)
+
+Examples:
+  civ tags anima
+  civ tags "hatsune miku" --limit 50
+  civ tags masterpiece --json
+`
+
 // Tags runs the tags command: civ tags <query> — tag-name completion for
 // prompt engineering.
 func Tags(args []string) {
 	var o tagsOptions
-	execute("tags", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	execute("tags", tagsHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runTags(ctx, g, pos, &o)
 	})
 }

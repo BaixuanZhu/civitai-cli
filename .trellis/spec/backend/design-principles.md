@@ -105,15 +105,71 @@ Growth never renegotiates the architecture; it follows these checklists.
 
 1. `main.go`: one `case` in the dispatch switch + one line in `usage()`.
    Nothing else — main stays logic-free.
-2. `internal/cmd/<name>.go`: a `register` function binding the command's
-   flags; a pure `run<Name>(ctx context.Context, g *globals, pos []string) error`
+2. `internal/cmd/<name>.go`: a curated `<name>Help` const (see
+   [Command help pages](#command-help-pages) below); a `register` function
+   binding the command's flags; a pure
+   `run<Name>(ctx context.Context, g *globals, pos []string) error`
    that does the work; wire via `execute` (default exit codes) or
    `executeWithExitCode` with an `exitMap`/`hint` if semantics differ
    (pattern: `vetExitCode`/`vetErrorHint` in `vet.go`).
 3. Fetch through `newAPIClient(g)`; render through `internal/report`; write
    results to `g.stdout()`.
 4. Tests: replace the seam vars, serve `httptest` fixtures, assert output
-   *and* exit codes (`cmd/vet_test.go`, `cmd/login_test.go` are templates).
+   *and* exit codes (`cmd/vet_test.go`, `cmd/login_test.go` are templates);
+   add the help-page assertions to `scripts/integration-test.sh`.
+
+### Command help pages
+
+**What**: every subcommand (including the flagless `upgrade`, via
+`upgrade.Help()` routed by `main.go`) ships a curated help page reached two
+equivalent ways: `civ <cmd> help` (single bare positional) and
+`civ <cmd> -h/-help/--help` (flag package returns `flag.ErrHelp`). Both
+print to **stdout** with **exit 0** — never stderr — before any run work
+(no prompt, network, or config access).
+
+**Contract** (`cmd/help.go`):
+
+- `execute`/`executeWithExitCode` take the page as their `help string`
+  parameter; the runner owns interception (`fs.Usage = func(){}` suppresses
+  the Go default dump everywhere, including unknown-flag errors, which stay
+  exit 1 with a one-line message).
+- Page constant layout, in order: one-line purpose (first line),
+  `Usage:` (positional args shown), `Options:` (own flags only, legal
+  values + defaults in the description; omit when the command has none),
+  `Examples:` (2+, one showing `--json`), optional `Notes:`/`Exit codes:`.
+  `writeCommandHelp` prepends `civ <name> - ` and appends the shared
+  `globalHelpBlock`.
+- **Never embed global-flag rows in a page constant** — `globalHelpBlock`
+  is the single source; `TestAllHelpPages_SectionOrder` fails on duplicates.
+
+**Wrong**:
+```go
+const myHelp = `do X
+
+Options:
+  --json  ...   // global flag copied into the page — drifts on the next global change
+`
+```
+
+**Correct**:
+```go
+const myHelp = `do X
+
+Usage:
+  civ mycmd <arg> [flags]
+
+Options:
+  --flag <v>  what it does (values: a, b, c; default a)
+
+Examples:
+  civ mycmd foo --flag b --json
+`
+```
+
+**Tests**: `TestAllHelpPages_SectionOrder` (rendered section order + no
+duplicated global rows) per package; integration `help_pages` section
+asserts dual entry, stdout-only, signature flags, and the `civ login help`
+anti-hang (empty stdin).
 
 ### Add an API endpoint
 

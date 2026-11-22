@@ -15,6 +15,33 @@ import (
 	"civitai-cli/internal/config"
 )
 
+// loginHelp is the curated `civ login help` / `-h` page (without the
+// shared global block, which writeCommandHelp appends): the key candidate
+// precedence, the history-safe stdin forms, and the login exit codes.
+const loginHelp = `save an API token to the config file
+
+Usage:
+  civ login [--key <token> | <token>] [flags]
+
+Options:
+  --key <token>    API key to save; "-" reads the key from stdin
+  -t <token>       Shorthand for --key
+
+Examples:
+  civ login
+  civ login cifcYourApiKey123
+  echo "$KEY" | civ login --key -
+
+Notes:
+  The key candidate is picked in this order: --key/-t flag, then one
+  positional argument, then the global --token flag, then an interactive
+  stdin prompt (never echoed). A key typed on the command line stays in
+  shell history and process listings; prefer the prompt or the piped form.
+  The candidate is verified against the API before anything is saved.
+  Exit codes: 0 saved; 1 empty or invalid input; 2 network failure;
+  4 key rejected.
+`
+
 // Login runs the login command: civ login. The API key candidate comes
 // from the --key/-t flag, a single positional argument, or the global
 // --token flag, in that precedence order; with no candidate it is read
@@ -26,7 +53,7 @@ import (
 // never echoed to stdout.
 func Login(args []string) {
 	var o loginOptions
-	executeWithExitCode("login", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	executeWithExitCode("login", loginHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runLogin(ctx, g, pos, &o, os.Stdin)
 	}, loginExitCode, loginErrorHint)
 }
@@ -152,11 +179,30 @@ func loginErrorHint(err error, hasToken bool) {
 	printErrorHint(err, hasToken)
 }
 
+// logoutHelp is the curated `civ logout help` / `-h` page (without the
+// shared global block, which writeCommandHelp appends). It states plainly
+// that the whole config file goes, saved proxy included (runLogout calls
+// config.Delete, and Config holds token and proxy).
+const logoutHelp = `remove the saved API token
+
+Usage:
+  civ logout
+
+Examples:
+  civ logout
+  civ login
+
+Notes:
+  Logout deletes the whole config file: a proxy saved via civ proxy set is
+  cleared as well. To clear only the proxy and keep the token, run
+  civ proxy unset. Idempotent: exit 0 even when nothing was saved.
+`
+
 // Logout runs the logout command: civ logout. It deletes the config file
 // (idempotent) and prints a friendly confirmation. Exit 0 even when no
 // key was saved; exit 1 on a usage error or an unexpected removal failure.
 func Logout(args []string) {
-	execute("logout", args, nil, runLogout)
+	execute("logout", logoutHelp, args, nil, runLogout)
 }
 
 // runLogout is the pure logout implementation (testable without os.Exit).

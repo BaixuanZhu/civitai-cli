@@ -52,10 +52,38 @@ func (o *searchOptions) register(fs *flag.FlagSet) {
 	fs.IntVar(&o.limit, "limit", 20, "max results (1-100)")
 }
 
+// searchHelp is the curated `civ search help` / `-h` page (without the
+// shared global block, which writeCommandHelp appends). Legal --sort and
+// --period values mirror api/enums.go so the page cannot drift from the
+// validation in runSearch.
+const searchHelp = `search Civitai models
+
+Usage:
+  civ search <query> [flags]
+
+Options:
+  --type <list>    Model type filter; repeatable or comma-separated
+                   (checkpoint, lora, locon, ti, hypernet, vae, ...)
+  --base <list>    BaseModel filter, comma-separated; unregistered values
+                   warn, and the API applies only the first
+  --sort <order>   hot, highest-rated, most-downloaded, most-liked,
+                   most-discussed, most-collected, most-images, newest,
+                   oldest, recently-added (default hot)
+  --period <p>     Ranking period: day, week, month, year, all (default all)
+  --tag <name>     Exact tag filter
+  --user <name>    Creator username filter
+  --limit <n>      Max results, 1-100 (default 20)
+
+Examples:
+  civ search stocking --type lora --limit 5
+  civ search "masterpiece" --sort newest --base sdxl --period month
+  civ search "hatsune miku" --type lora --json
+`
+
 // Search runs the search command: civ search <query> [flags].
 func Search(args []string) {
 	var o searchOptions
-	execute("search", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	execute("search", searchHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runSearch(ctx, g, pos, &o)
 	})
 }

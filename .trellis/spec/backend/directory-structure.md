@@ -49,6 +49,8 @@ civitai-cli/
 │   ├── cmd/                # command handlers: flag parse -> api -> report -> exit code
 │   │   ├── globals.go      #   globals, registerGlobalFlags, execute/executeWithExitCode,
 │   │   │                   #   exitCodeFor, printErrorHint, permuteArgs, newAPIClient seam
+│   │   ├── help.go         #   per-command help pages: globalHelpBlock, writeCommandHelp,
+│   │   │                   #   isBareHelp (stdout + exit 0 for `civ <cmd> help` / -h)
 │   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
 │   ├── config/             # leaf: token + proxy persistence, priority resolution
 │   │   └── config.go       #   Path/Load/Save/Delete/ResolveToken/ResolveProxy
@@ -134,8 +136,10 @@ paths.
 
 Command logic lives in **pure `run*` functions** that return `error` and never
 call `os.Exit`; the shared `execute`/`executeWithExitCode` runner owns flag
-parsing, verbose mode, the error line + hint, and `os.Exit`. This is what makes
-exit-code and rendering behavior table-testable offline.
+parsing, verbose mode, the error line + hint, help-page interception
+(`civ <cmd> help` / `-h` → stdout, exit 0, before any run work), and
+`os.Exit`. This is what makes exit-code and rendering behavior table-testable
+offline.
 
 > Note vs the reference project: `danbooru-tag-mcp` keeps response structs in the
 > consumer (`service`). Here the response structs and `Parse*` decoders live in
@@ -157,6 +161,7 @@ exit-code and rendering behavior table-testable offline.
 | Token / proxy persistence | `internal/config` | leaf (imports `app` + `proxy`); `Config.Proxy` + `ResolveProxy` mirror the token pattern; `cmd` calls `ResolveToken`/`ResolveProxy` at the seams |
 | Outbound proxy URL | `internal/proxy` | leaf, stdlib `net/http`+`net/url` only; owns `Validate`/`Resolve`/`NewTransport`; `api`/`upgrade` install transports via `NewTransport`, `cmd`/`config` resolve precedence via `Resolve` |
 | Bundled Skill management | `internal/skill` | leaf; `go:embed` source in `assets/`; pure file ops + `ConflictFunc` callback; `cmd/skill` owns interactive/flag UX |
+| Command help page | `internal/cmd` | `<name>Help` const beside the command + `help` param on `execute*`; shared `globalHelpBlock` in `cmd/help.go` is the ONLY copy of global-flag rows; `upgrade` (outside `cmd`) exposes `upgrade.Help()` routed by `main.go` |
 
 ---
 

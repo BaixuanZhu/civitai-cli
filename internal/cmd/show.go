@@ -30,10 +30,32 @@ func (o *showOptions) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.prompts, "prompts", false, "with -v, append example-image generation recipes (prompt/negativePrompt/steps/cfgScale/sampler/scheduler)")
 }
 
+// showHelp is the curated `civ show help` / `-h` page (without the shared
+// global block, which writeCommandHelp appends). It documents the -v/--ver
+// drill-down and that --prompts requires -v (runShow enforces the pair).
+const showHelp = `show a model's header and version table
+
+Usage:
+  civ show <modelId> [-v <versionId>] [flags]
+
+Options:
+  -v <id>          Drill into this version: files, full hashes, trigger
+                   words, and scan results
+  --ver <id>       Alias of -v
+  --prompts        With -v, append example-image generation recipes
+                   (prompt, negative prompt, steps, cfgScale, sampler,
+                   scheduler); requires -v <versionId>
+
+Examples:
+  civ show 182296
+  civ show 182296 -v 482391
+  civ show 182296 --ver 482391 --prompts --json
+`
+
 // Show runs the show command: civ show <modelId> [-v <versionId>].
 func Show(args []string) {
 	var o showOptions
-	execute("show", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+	execute("show", showHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
 		return runShow(ctx, g, pos, &o)
 	})
 }

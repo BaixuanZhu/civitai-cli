@@ -9,6 +9,21 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- Built-in per-command help: `civ <command> help` and `civ <command>
+  -h/--help` print a curated page (usage with positional arguments, the
+  command's flags with legal values and defaults, examples, and the shared
+  global-flags section) to stdout with exit 0 — for every command including
+  `upgrade`. This replaces the Go default flag dump that previously went to
+  stderr with no synopsis or examples. The `help` keyword is only
+  intercepted as a single argument, so `civ search help me` still searches
+  the query "help me", and `civ login help` returns immediately without
+  touching stdin. `civ help` now points at the per-command pages, and
+  unknown-flag errors no longer print the noisy default usage dump.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

@@ -350,3 +350,55 @@ func TestApplyPersistedProxy_InvalidSavedValueDegrades(t *testing.T) {
 		t.Errorf("expected a [WARN] degrade line on stderr, got log %q", buf.String())
 	}
 }
+
+// TestHelp pins the curated `civ upgrade help` page contract: main prints
+// the string verbatim (so it must carry its own "civ upgrade -" title,
+// unlike the runner-routed command pages), the Usage and Examples sections
+// of the shared layout, and the upgrade-specific notes (exit codes, the
+// .bak swap, and that the --proxy flag does not apply here).
+func TestHelp(t *testing.T) {
+	page := Help()
+	for _, want := range []string{
+		"civ upgrade - ",
+		"Usage:\n  civ upgrade",
+		"What it does:",
+		"Examples:\n  civ upgrade\n",
+		".bak",
+		"0 success",
+		"the --proxy flag does not apply",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("upgrade help page missing %q", want)
+		}
+	}
+	if !strings.HasSuffix(page, "\n") {
+		t.Errorf("upgrade help page must end with a newline")
+	}
+}
+
+// TestHelp_SectionOrder applies the cross-all-pages layout audit (task
+// 11-22 prd AC8) to the tenth page: Help is printed verbatim by main — no
+// runner, so no appended global block — and must keep the shared order on
+// the sections it does have (Usage before Examples; no Options, upgrade is
+// flagless), document json (un)availability itself (the Output section
+// states --json does not apply), and embed no copy of any global flag row
+// (the page explains --proxy does not apply instead).
+func TestHelp_SectionOrder(t *testing.T) {
+	page := Help()
+	u := strings.Index(page, "Usage:")
+	e := strings.Index(page, "Examples:")
+	if u < 0 || e < 0 || u >= e {
+		t.Errorf("upgrade help: Usage(%d) must precede Examples(%d)", u, e)
+	}
+	if strings.Index(page, "Usage:") > strings.Index(page, "Exit codes:") {
+		t.Errorf("upgrade help: Usage must open the page before Exit codes")
+	}
+	if !strings.Contains(page, "--json") {
+		t.Errorf("upgrade help: must document json (un)availability — the global --json row never reaches this page")
+	}
+	for _, row := range []string{"Global flags", "--token <key>", "--proxy <url>", "--timeout <dur>"} {
+		if strings.Contains(page, row) {
+			t.Errorf("upgrade help: must not embed the global flag row %q (main prints the page without the shared block)", row)
+		}
+	}
+}

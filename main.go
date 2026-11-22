@@ -64,6 +64,12 @@ func main() {
 	case "skill":
 		cmd.Skill(os.Args[2:])
 	case "upgrade":
+		// upgrade has no flags, so it bypasses the runner's help handling;
+		// main routes its help tokens directly (task 11-22 design D4).
+		if isUpgradeHelpArg(os.Args[2:]) {
+			fmt.Print(upgrade.Help())
+			return
+		}
 		upgrade.Run()
 	case "unbootstrap":
 		// Internal maintenance hook invoked by the uninstaller (not listed in
@@ -81,6 +87,22 @@ func main() {
 		usage(os.Stderr)
 		os.Exit(1)
 	}
+}
+
+// isUpgradeHelpArg reports whether args is exactly one help token: the
+// bare `civ upgrade help` keyword or the -h/-help/--help flag form.
+// upgrade bypasses the shared runner in internal/cmd (it has no flags to
+// parse), so this check lives in main next to the routing; printing the
+// page and returning normally keeps the stdout/exit-0 help contract.
+func isUpgradeHelpArg(args []string) bool {
+	if len(args) != 1 {
+		return false
+	}
+	switch args[0] {
+	case "help", "-h", "-help", "--help":
+		return true
+	}
+	return false
 }
 
 // usage prints the command overview and global flags to w.
@@ -103,6 +125,8 @@ Commands:
   upgrade          Self-update from the latest GitHub Release
   version          Print the civ version
   help             Print this help
+
+Run "civ <command> help" (or civ <command> -h) for flags and examples.
 
 Global flags (after the command name):
   --json           Machine-readable output (human decoration off)
