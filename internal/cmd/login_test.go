@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,101 @@ import (
 	"civitai-cli/internal/config"
 )
 
+// runLoginCmd mirrors the Login command wiring — login flag registration
+// plus the shared arg permutation — without os.Exit, so precedence tests
+// exercise the same parse path as the real CLI.
+func runLoginCmd(t *testing.T, env *testEnv, stdin io.Reader, args ...string) error {
+	t.Helper()
+	var o loginOptions
+	pos := parseForTest(t, &env.g, o.register, args)
+	return runLogin(context.Background(), &env.g, pos, &o, stdin)
+}
+
+// TestLogin_CandidatePrecedence drives runLogin through the real flag
+// parse path for every candidate source (flag, positional, global --token,
+// stdin) and every rejection shape (empty/whitespace, multi-positional),
+// asserting the saved token, the probe's Authorization header, and the
+// exit mapping.
+func TestLogin_CandidatePrecedence(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		stdin   string
+		wantKey string // saved token and probe auth ("Bearer <wantKey>")
+		wantErr string // non-empty: expect exit 1 and this message fragment
+	}{
+		{name: "flag key", args: []string{"--key", "flag-key"}, wantKey: "flag-key"},
+		{name: "flag key shorthand t", args: []string{"-t", "short-key"}, wantKey: "short-key"},
+		{name: "flag key equals form", args: []string{"--key=eq-key"}, wantKey: "eq-key"},
+		{name: "flag beats positional and global token", args: []string{"--key", "flag-key", "pos-key", "--token", "global-key"}, wantKey: "flag-key"},
+		{name: "positional key", args: []string{"pos-key"}, wantKey: "pos-key"},
+		{name: "positional beats global token", args: []string{"pos-key", "--token", "global-key"}, wantKey: "pos-key"},
+		{name: "global token", args: []string{"--token", "global-key"}, wantKey: "global-key"},
+		// An explicitly empty --token is indistinguishable from an absent one
+		// (StringVar zero value), so it falls back to the stdin prompt.
+		{name: "empty global token falls back to stdin", args: []string{"--token", ""}, stdin: "stdin-key\n", wantKey: "stdin-key"},
+		{name: "stdin prompt fallback", stdin: "stdin-key\n", wantKey: "stdin-key"},
+		{name: "stdin pipe trims whitespace", stdin: "  piped-key  \n", wantKey: "piped-key"},
+		{name: "key dash reads stdin", args: []string{"--key", "-"}, stdin: "piped-key\n", wantKey: "piped-key"},
+		{name: "t dash reads stdin", args: []string{"-t", "-"}, stdin: "piped-key\n", wantKey: "piped-key"},
+		{name: "flag key trims whitespace", args: []string{"--key", "  spaced  "}, wantKey: "spaced"},
+		{name: "positional trims whitespace", args: []string{"  spaced  "}, wantKey: "spaced"},
+		{name: "empty flag key", args: []string{"--key", ""}, wantErr: "no API key"},
+		// Piped stdin must NOT rescue an explicit empty flag: an empty
+		// --key/-t is an empty candidate (exit 1), never a prompt fallthrough.
+		{name: "empty flag key ignores piped stdin", args: []string{"--key", ""}, stdin: "stdin-key\n", wantErr: "no API key"},
+		{name: "empty t shorthand ignores piped stdin", args: []string{"-t", ""}, stdin: "stdin-key\n", wantErr: "no API key"},
+		{name: "whitespace flag key", args: []string{"--key", "   "}, wantErr: "no API key"},
+		{name: "empty positional", args: []string{""}, wantErr: "no API key"},
+		{name: "multiple positionals", args: []string{"a", "b"}, wantErr: "at most one"},
+		{name: "empty stdin", stdin: "", wantErr: "no API key"},
+		{name: "whitespace stdin", stdin: "   \n", wantErr: "no API key"},
+		{name: "empty stdin with key dash", args: []string{"--key", "-"}, stdin: "\n", wantErr: "no API key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth string
+			env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				w.Write([]byte(`{"items":[],"metadata":{}}`))
+			})
+			err := runLoginCmd(t, env, strings.NewReader(tc.stdin), tc.args...)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
+				}
+				if got := loginExitCode(err, false); got != 1 {
+					t.Errorf("empty/usage input must map to exit 1, got %d", got)
+				}
+				if env.lastPath != "" {
+					t.Errorf("rejected input must not probe the API, got request %q", env.lastPath)
+				}
+				c, _ := config.Load()
+				if c.Token != "" {
+					t.Errorf("rejected input must not save a token, got %q", c.Token)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runLogin: %v", err)
+			}
+			if gotAuth != "Bearer "+tc.wantKey {
+				t.Errorf("probe must carry the candidate key, Authorization = %q", gotAuth)
+			}
+			c, err := config.Load()
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			if c.Token != tc.wantKey {
+				t.Errorf("saved token = %q, want %q", c.Token, tc.wantKey)
+			}
+			if !strings.Contains(env.buf.String(), "Logged in") {
+				t.Errorf("success must confirm on stdout, got %q", env.buf.String())
+			}
+		})
+	}
+}
+
 func TestLogin_SuccessSavesConfig(t *testing.T) {
 	var gotAuth string
 	var gotQuery url.Values
@@ -23,7 +119,7 @@ func TestLogin_SuccessSavesConfig(t *testing.T) {
 		w.Write([]byte(`{"items":[],"metadata":{}}`))
 	})
 	// Surrounding whitespace must be trimmed before probing/saving.
-	if err := runLogin(context.Background(), &env.g, nil, strings.NewReader("  candidate-key  \n")); err != nil {
+	if err := runLogin(context.Background(), &env.g, nil, &loginOptions{}, strings.NewReader("  candidate-key  \n")); err != nil {
 		t.Fatalf("runLogin: %v", err)
 	}
 	c, err := config.Load()
@@ -48,12 +144,37 @@ func TestLogin_SuccessSavesConfig(t *testing.T) {
 	}
 }
 
+// TestLogin_LoadModifySavePreservesConfig pins the load-modify-save flow:
+// login rewrites only the token of the loaded config instead of writing a
+// fresh Config. Config currently has just the token field, so the sibling
+// preservation guarantee (e.g. the planned proxy setting surviving a
+// login) becomes observable once config gains a second field; today the
+// test asserts the modify-over-existing-file path.
+func TestLogin_LoadModifySavePreservesConfig(t *testing.T) {
+	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"items":[],"metadata":{}}`))
+	})
+	if err := config.Save(config.Config{Token: "old-key"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := runLoginCmd(t, env, strings.NewReader(""), "--key", "new-key"); err != nil {
+		t.Fatalf("runLogin: %v", err)
+	}
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if c.Token != "new-key" {
+		t.Errorf("login must replace the saved token via load-modify-save, got %q", c.Token)
+	}
+}
+
 func TestLogin_Rejected401Exit4NoSave(t *testing.T) {
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"Unauthorized"}`))
 	})
-	err := runLogin(context.Background(), &env.g, nil, strings.NewReader("bad-key\n"))
+	err := runLogin(context.Background(), &env.g, nil, &loginOptions{}, strings.NewReader("bad-key\n"))
 	var ue *api.UnauthorizedError
 	if !errors.As(err, &ue) {
 		t.Fatalf("401 must yield UnauthorizedError, got %v", err)
@@ -83,7 +204,7 @@ func TestLogin_NetworkExit2NoSave(t *testing.T) {
 			api.WithBackoffs(time.Millisecond, time.Millisecond),
 		)
 	}
-	err := runLogin(context.Background(), &env.g, nil, strings.NewReader("key\n"))
+	err := runLogin(context.Background(), &env.g, nil, &loginOptions{}, strings.NewReader("key\n"))
 	var ne *api.NetworkError
 	if !errors.As(err, &ne) {
 		t.Fatalf("500 retries exhausted must yield NetworkError, got %v", err)
@@ -97,48 +218,13 @@ func TestLogin_NetworkExit2NoSave(t *testing.T) {
 	}
 }
 
-func TestLogin_EmptyInputExit1(t *testing.T) {
-	for _, input := range []string{"", "   ", "\n", "  \t  \n"} {
-		env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-			t.Errorf("empty input must not probe the API")
-			w.Write([]byte(`{"items":[]}`))
-		})
-		err := runLogin(context.Background(), &env.g, nil, strings.NewReader(input))
-		if err == nil {
-			t.Errorf("input %q must be rejected", input)
-			continue
-		}
-		if got := loginExitCode(err, false); got != 1 {
-			t.Errorf("input %q: empty input must map to exit 1, got %d", input, got)
-		}
-		if env.lastPath != "" {
-			t.Errorf("input %q: no API request expected, got %q", input, env.lastPath)
-		}
-		c, _ := config.Load()
-		if c.Token != "" {
-			t.Errorf("input %q: must not save a token", input)
-		}
-	}
-}
-
-func TestLogin_UsageErrorWithArgs(t *testing.T) {
-	env := newTestEnv(t, fixtureHandler(t, nil))
-	err := runLogin(context.Background(), &env.g, []string{"extra"}, strings.NewReader("k\n"))
-	if err == nil || !strings.Contains(err.Error(), "no arguments") {
-		t.Fatalf("login with positional args must be a usage error, got %v", err)
-	}
-	if loginExitCode(err, false) != 1 {
-		t.Errorf("usage error must map to exit 1")
-	}
-}
-
 func TestLogin_PromptOnStderrKeyNotEchoed(t *testing.T) {
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"items":[]}`))
 	})
 	const key = "supersecretkey"
 	stderr := captureStderr(t, func() {
-		if err := runLogin(context.Background(), &env.g, nil, strings.NewReader(key+"\n")); err != nil {
+		if err := runLogin(context.Background(), &env.g, nil, &loginOptions{}, strings.NewReader(key+"\n")); err != nil {
 			t.Errorf("runLogin: %v", err)
 		}
 	})
@@ -173,7 +259,7 @@ func TestLogout_IdempotentFriendly(t *testing.T) {
 	env := newTestEnv(t, fixtureHandler(t, nil))
 	// No config saved: logout is a friendly no-op, exit 0.
 	if err := runLogout(context.Background(), &env.g, nil); err != nil {
-		t.Fatalf("logout without a saved key must succeed: %v", err)
+		t.Fatalf("runLogout without a saved key must succeed: %v", err)
 	}
 	if !strings.Contains(env.buf.String(), "No saved API key") {
 		t.Errorf("logout without a key must say so, got %q", env.buf.String())

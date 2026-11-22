@@ -22,6 +22,9 @@
 #   - upgrade is asserted graceful (exit 0/1, no panic) and run LAST: with no
 #     release it reports 404 (exit 1); after a release it may self-update the
 #     test exe, which is safe only because nothing runs after it.
+#   - login live coverage is rejection and usage only (invalid token via every
+#     input form -> exit 4, usage errors -> exit 1); the success save path
+#     needs a real account token and stays in the offline unit tests.
 #
 # Usage:
 #   bash scripts/integration-test.sh [exe]
@@ -115,6 +118,18 @@ run usage_error      search anima --limit 101
 # --- token management (isolated config; anonymous + invalid token) ---
 run logout           logout
 run_stdin login_bad  "invalid_integration_token" login
+# New login input forms (invalid token -> live 401 -> exit 4). Empty stdin on
+# the flag/positional/global forms is deliberate: a regression to the
+# interactive prompt would read the empty line and exit 1, failing the
+# exit-4 assertion loudly instead of hanging the script.
+run_stdin login_pos_bad     "" login invalid_integration_token
+run_stdin login_key_bad     "" login --key invalid_integration_token
+run_stdin login_t_bad       "" login -t invalid_integration_token
+run_stdin login_gtoken_bad  "" login --token invalid_integration_token
+run_stdin login_keydash_bad "invalid_integration_token" login --key -
+# Offline usage errors (no probe, no config write) -> exit 1.
+run login_multi  login a b
+run login_empty  login --key ""
 
 # --- skill subcommand (isolated home; pure local file ops) ---
 # Install all three (claude+codex left installed for filesystem assertions;
@@ -261,6 +276,37 @@ check(exit_of('login_bad') == 4,
 cfg = os.path.join(ISO_HOME, '..', 'appdata', 'civ', 'config.json')
 check(not os.path.exists(cfg),
       'login invalid token: no config.json written')
+
+# login new input forms with an invalid token: same live 401 -> exit 4, no
+# interactive prompt (except --key -, which reads stdin by design), no key
+# echo. Empty stdin on the flag/positional/global forms is deliberate: a
+# regression to the prompt would read the empty line -> exit 1, failing
+# the exit-4 check loudly, not hanging.
+for label, form in [
+    ('login_pos_bad', 'positional'),
+    ('login_key_bad', '--key flag'),
+    ('login_t_bad', '-t shorthand'),
+    ('login_gtoken_bad', 'global --token'),
+    ('login_keydash_bad', '--key - stdin read'),
+]:
+    check(exit_of(label) == 4
+          and 'invalid_integration_token' not in out_of(label) + err_of(label),
+          'login invalid token via %s: exit 4 (probe rejected, key not echoed)' % form)
+    if label != 'login_keydash_bad':
+        check('Paste API key' not in err_of(label),
+              'login via %s: no interactive prompt' % form)
+check(not os.path.exists(cfg),
+      'login invalid token (all input forms): no config.json written')
+
+# login offline usage errors: exit 1 with the usage message, no config write
+check(exit_of('login_multi') == 1
+      and 'at most one argument' in err_of('login_multi'),
+      'login a b: exit 1 (usage error: at most one argument)')
+check(exit_of('login_empty') == 1
+      and 'no API key' in err_of('login_empty'),
+      'login --key "": exit 1 (empty candidate)')
+check(not os.path.exists(cfg),
+      'login usage errors: no config.json written')
 
 # skill install: three platforms, JSON results, correct native roots
 si = json_of('skill_install')

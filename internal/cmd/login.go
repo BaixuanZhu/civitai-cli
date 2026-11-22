@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/url"
@@ -14,39 +15,98 @@ import (
 	"civitai-cli/internal/config"
 )
 
-// Login runs the login command: civ login. It reads an API key from stdin
-// (interactive paste or a pipe), validates it with the favorites probe
-// (GET /models?favorites=true&limit=1), and on success saves it to the
-// config file. Exit codes: 0 saved, 1 empty/usage input, 2 network failure,
-// 4 the key was rejected (401). The key is never echoed to stdout.
+// Login runs the login command: civ login. The API key candidate comes
+// from the --key/-t flag, a single positional argument, or the global
+// --token flag, in that precedence order; with no candidate it is read
+// from stdin (interactive paste or a pipe, never echoed). A --key/-t
+// value of "-" also reads the key from stdin. The candidate is validated
+// with the favorites probe (GET /models?favorites=true&limit=1) and on
+// success saved to the config file. Exit codes: 0 saved, 1 empty/usage
+// input, 2 network failure, 4 the key was rejected (401). The key is
+// never echoed to stdout.
 func Login(args []string) {
-	executeWithExitCode("login", args, nil, func(ctx context.Context, g *globals, pos []string) error {
-		return runLogin(ctx, g, pos, os.Stdin)
+	var o loginOptions
+	executeWithExitCode("login", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+		return runLogin(ctx, g, pos, &o, os.Stdin)
 	}, loginExitCode, loginErrorHint)
+}
+
+// loginOptions carries the login-specific flags.
+type loginOptions struct {
+	key loginKeyFlag
+}
+
+// register binds the login flags to fs. --key and its -t shorthand share
+// one value; a value of "-" means "read the key from stdin".
+func (o *loginOptions) register(fs *flag.FlagSet) {
+	fs.Var(&o.key, "key", "API key to save ('-' reads it from stdin)")
+	fs.Var(&o.key, "t", "API key to save (shorthand for --key)")
+}
+
+// loginKeyFlag is a string flag value that records whether it was set, so
+// an explicitly empty `--key ""` counts as an empty candidate (usage
+// error) instead of "flag absent" falling through to the stdin prompt.
+type loginKeyFlag struct {
+	set bool
+	val string
+}
+
+func (f *loginKeyFlag) String() string { return f.val }
+
+func (f *loginKeyFlag) Set(s string) error {
+	f.set = true
+	f.val = s
+	return nil
 }
 
 // runLogin is the pure login implementation with an injectable stdin so
 // tests can drive it with a strings.Reader (no terminal, no network).
-func runLogin(ctx context.Context, g *globals, pos []string, stdin io.Reader) error {
-	if len(pos) != 0 {
-		return errors.New("login takes no arguments; it reads the API key from stdin")
+// Candidate precedence: --key/-t flag > single positional argument >
+// global --token flag > stdin (interactive prompt or pipe). A --key/-t
+// value of "-" redirects to stdin for a history-safe one-liner (the
+// gh/curl "-" convention).
+func runLogin(ctx context.Context, g *globals, pos []string, o *loginOptions, stdin io.Reader) error {
+	if len(pos) > 1 {
+		return errors.New("login takes at most one argument (the API key)")
 	}
-	fmt.Fprint(os.Stderr, "Paste API key: ")
-	sc := bufio.NewScanner(stdin)
-	if !sc.Scan() {
-		if err := sc.Err(); err != nil {
-			return fmt.Errorf("login: read stdin: %w", err)
+	candidate := ""
+	readStdin := false
+	switch {
+	case o.key.set:
+		if o.key.val == "-" {
+			readStdin = true
+		} else {
+			candidate = o.key.val
 		}
-		return errors.New("no API key provided (empty input)")
+	case len(pos) == 1:
+		candidate = pos[0]
+	case g.Token != "":
+		candidate = g.Token
+	default:
+		readStdin = true
 	}
-	key := strings.TrimSpace(sc.Text())
+
+	var key string
+	if readStdin {
+		fmt.Fprint(os.Stderr, "Paste API key: ")
+		sc := bufio.NewScanner(stdin)
+		if !sc.Scan() {
+			if err := sc.Err(); err != nil {
+				return fmt.Errorf("login: read stdin: %w", err)
+			}
+			return errors.New("no API key provided (empty input)")
+		}
+		key = strings.TrimSpace(sc.Text())
+	} else {
+		key = strings.TrimSpace(candidate)
+	}
 	if key == "" {
 		return errors.New("no API key provided (empty input)")
 	}
 
 	// Probe with the candidate key. A copy of globals carries it as the
 	// flag token so newAPIClient (the test-redirectable factory) builds a
-	// client authenticated with the pasted key, not the saved one.
+	// client authenticated with the candidate key, not the saved one.
 	probe := *g
 	probe.Token = key
 	c := newAPIClient(&probe)
@@ -57,7 +117,12 @@ func runLogin(ctx context.Context, g *globals, pos []string, stdin io.Reader) er
 		return err // 401 → loginExitCode → exit 4 (nothing saved); network → 2
 	}
 
-	if err := config.Save(config.Config{Token: key}); err != nil {
+	// Load-modify-save: rewrite only the token of the loaded config so
+	// sibling fields (e.g. a future proxy setting) survive a login instead
+	// of being wiped by a fresh Config.
+	cfg, _ := config.Load()
+	cfg.Token = key
+	if err := config.Save(cfg); err != nil {
 		return err
 	}
 	fmt.Fprintf(g.stdout(), "Logged in. API key saved to %s\n", config.Path())
@@ -65,8 +130,8 @@ func runLogin(ctx context.Context, g *globals, pos []string, stdin io.Reader) er
 }
 
 // loginExitCode maps a rejected candidate key to exit 4 regardless of the
-// resolved globals token: login always probes WITH the pasted key, so a
-// 401 means that key is invalid (the global hasToken heuristic does not
+// resolved globals token: login always probes WITH the candidate key, so
+// a 401 means that key is invalid (the global hasToken heuristic does not
 // apply). Every other class keeps the shared mapping.
 func loginExitCode(err error, hasToken bool) int {
 	var ue *api.UnauthorizedError

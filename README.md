@@ -275,16 +275,29 @@ civ tags anima --json     # array of tag names
 ### `civ login` / `civ logout` — token management
 
 ```bash
-civ login     # paste your API key at the prompt (read from stdin; never echoed)
-civ logout    # remove the saved key (idempotent)
+civ login --key "$KEY"   # flag form (short: -t)
+civ login "$KEY"         # positional form
+civ login --token "$KEY" # reuses the global token flag
+civ login                # interactive prompt (read from stdin; never echoed)
+civ login --key -        # read the key from stdin (history-safe one-liner)
+civ logout               # remove the saved key (idempotent)
 ```
 
-`login` validates the pasted key with a favorites probe
-(`GET /models?favorites=true&limit=1`: 200 = valid, 401 = rejected) and, on
-success, saves it to `%APPDATA%\civ\config.json`. A rejected key exits `4` and
-saves nothing; a network failure exits `2`. You can also pipe a key:
-`echo "$KEY" | civ login`. `logout` deletes the config file and exits `0` even
-when no key was saved.
+`login` accepts the key from, highest precedence first: the `--key` / `-t`
+flag, exactly one positional argument, the global `--token` flag, or the
+stdin prompt (`echo "$KEY" | civ login` also works, and `--key -` / `-t -`
+reads stdin without carrying the key in the command line). The candidate is
+validated with a favorites probe (`GET /models?favorites=true&limit=1`:
+200 = valid, 401 = rejected) and, on success, saved to
+`%APPDATA%\civ\config.json` — login rewrites only the token of the loaded
+config, so other settings in the file survive. An empty or whitespace key,
+or more than one positional argument, exits `1` without saving; a rejected
+key exits `4` and saves nothing; a network failure exits `2`.
+
+A key passed on the command line (`--key`, `-t`, positional) is recorded in
+your shell history and visible in the process list; prefer
+`echo "$KEY" | civ login` or `civ login --key -` when that matters.
+`logout` deletes the config file and exits `0` even when no key was saved.
 
 ### `civ upgrade` — self-update
 

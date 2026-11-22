@@ -9,6 +9,18 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [0.2.0] - Unreleased
+
+### Added
+
+- `civ login` accepts the API key non-interactively: `civ login --key <token>`
+  (short `-t`), a single positional `civ login <token>`, or the global
+  `--token` flag — in that precedence, with the interactive prompt kept as the
+  fallback. `--key -` / `-t -` reads the key from stdin (gh/curl convention)
+  for a history-safe one-liner. Saving is load-modify-save, so other config
+  fields survive a login; empty or whitespace candidates exit 1 before any
+  probe or save. Help and README document the history-exposure tradeoff.
+
 ## [0.1.1] - 2026-11-22
 
 ### Fixed

@@ -93,7 +93,7 @@ Commands:
   vet <path|hash>  Audit a local file (or SHA256/AutoV2 hash) against the Civitai registry (--prompts)
   sync <dir>       Batch-audit a directory (--ext --format table|csv|json --concurrency --rehash)
   tags <query>     Tag name completion (--limit)
-  login            Save an API token (validated via a favorites probe)
+  login [key]      Save an API token: --key/-t <key>, one positional <key>, --token, or a stdin prompt
   logout           Remove the saved API token
   skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
   upgrade          Self-update from the latest GitHub Release
@@ -105,6 +105,13 @@ Global flags (after the command name):
   --token <key>    API token; overrides CIVITAI_API_KEY and the saved config (anonymous by default)
   --timeout <dur>  Per-request HTTP timeout (default 30s)
   --verbose        Verbose [INFO]/[DEBUG] logging to stderr
+
+Login:
+  Key precedence: --key/-t flag > one positional argument > --token > stdin
+  prompt (a pipe works too); --key - / -t - reads the key from stdin. A key
+  typed on the command line is exposed via shell history and the process
+  list; prefer piping (echo "$KEY" | civ login) or civ login --key - (both
+  read the key from stdin, never echoed) when that matters.
 
 Environment:
   CIVITAI_API_KEY  API token (below --token, above the saved config)

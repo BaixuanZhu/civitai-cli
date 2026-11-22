@@ -91,6 +91,16 @@ publishing.
   weekly schedule / manual dispatch + local `make integration`. Exports
   `CIV_NO_BOOTSTRAP=1` / `CIV_NO_CACHE=1` itself (cache replay would mask upstream
   drift — this is the drift canary). Never in the release-blocking path.
+- **Integration coverage is part of every CLI-surface change** (convention,
+  2026-11-22): any task that adds, modifies, or removes CLI surface (command,
+  subcommand, flag, input form, output shape, exit code) must update
+  `scripts/integration-test.sh` in the same change — new surface gets cases,
+  changed behavior gets updated assertions, removed features get their cases
+  deleted (dead cases mask regressions and lie about the surface). The task's
+  PRD lists the intended integration cases in its acceptance criteria; the
+  check phase verifies script-to-surface parity. Offline-assertable cases
+  (usage errors, local file effects) always run; live-API cases share the
+  script's existing network preconditions.
 - **Gate**: `go vet ./... && go test ./... && go test -race ./...` must be green
   before commit/release.
 
@@ -102,6 +112,8 @@ publishing.
 - [ ] New endpoint goes through `Client.Get`; no direct `net/http` elsewhere.
 - [ ] All text English; exported symbols have `// Symbol ...` GoDoc.
 - [ ] New behavior has a table-driven / `httptest` test; unit tests stay offline.
+- [ ] CLI surface changed (add/modify/remove command, flag, input form, output,
+      exit code) → `scripts/integration-test.sh` updated in the same change.
 - [ ] Errors wrapped with `%w` + package prefix; classified with `errors.As`;
       degradation warns instead of failing.
 - [ ] Exit-code semantics preserved (0/1/2/3/4; `sync` not_found = data row).
