@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/civitai-cli-plan.md", "reason": "vet 命令契约：§4.3 报告样例与退出码、附录 A.4 by-hash 规范"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/design.md", "reason": "全局契约 D2-D4/D7 与 §3 vet 数据流"}

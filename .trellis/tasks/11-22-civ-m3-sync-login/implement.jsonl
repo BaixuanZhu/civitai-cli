@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/civitai-cli-plan.md", "reason": "sync/login/--prompts 契约：§4.2/4.4/4.6、§3.3 NSFW 与 meta null 坑"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/design.md", "reason": "全局契约 D8 配置与缓存路径、D7 输出约定"}

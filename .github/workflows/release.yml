@@ -1,0 +1,230 @@
+# Build and publish on tag push (v0.1.0): produces the double-click NSIS
+# setup exes and portable zips for both architectures and publishes a GitHub
+# Release.
+# Artifacts (amd64 / arm64):
+#   civitai-cli-windows-<arch>-setup.exe   double-click installer (for new users)
+#   civitai-cli-windows-<arch>.zip         portable zip (fetched by `civ upgrade` self-update)
+#   checksums.txt                          sha256sum manifest shared by upgrade and install.ps1
+#   install.ps1                            one-line PowerShell installer (stable URL on main)
+#
+# Release integrity = reproducible builds + SHA-256 (no Authenticode):
+# the exe and zips are byte-reproducible (pinned toolchain via go.mod,
+# CGO_ENABLED=0, -buildvcs=false, deterministic zipfile helper), keyless
+# GitHub attestations prove which workflow built each asset, and the
+# verify-repro job rebuilds the exe on Linux and compares it against the
+# published Windows-built asset. The NSIS setup exe is NOT byte-reproducible
+# (makensis embeds build metadata) -- it is covered by checksums + attestation.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # softprops/action-gh-release needs this to create the release and upload assets
+  id-token: write  # actions/attest-build-provenance needs this for keyless signing
+  attestations: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # go.mod pins the exact toolchain (reproducible builds); CI and
+          # local rebuilds must compile with the same gc patch release.
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test (pre-release unit test gate)
+        # Red tests fail the job and block the release. Publishing is an
+        # irreversible outward-facing action and this project is security
+        # sensitive (downloads binaries, writes PATH/registry, self-updates),
+        # so confirm the suite is green before publishing. The runner is an
+        # isolated VM, so the gated registry test may run here.
+        env:
+          CIV_TEST_REGISTRY: '1'
+        run: go test ./...
+
+      - name: Derive version from tag
+        id: ver
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build civ.exe (amd64 + arm64)
+        # Both arches built sequentially into dist/amd64/ and dist/arm64/,
+        # exactly once: the installer-only/zip targets below package this
+        # same build, so every artifact embeds the identical exe.
+        run: |
+          make build-dist VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=amd64
+          make build-dist VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=arm64
+
+      - name: Install NSIS
+        shell: pwsh
+        # choco installs NSIS into C:\Program Files (x86)\NSIS but does not
+        # refresh the current job's PATH, so a later plain "makensis" call
+        # would fail with command not found. makensis.exe sits directly in
+        # that directory (no version subdirectory), so add it explicitly.
+        run: |
+          choco install nsis -y --no-progress
+          $nsisDir = 'C:\Program Files (x86)\NSIS'
+          if (-not (Test-Path "$nsisDir\makensis.exe")) {
+            throw "makensis.exe not found under $nsisDir"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
+          Write-Host "Added to GITHUB_PATH: $nsisDir"
+
+      - name: Verify makensis
+        # Fail here with a clear error instead of buried inside make
+        shell: pwsh
+        run: makensis /VERSION
+
+      - name: Package installer (amd64 + arm64)
+        # installer-only packs the already-built exe (no rebuild) into
+        # dist/civitai-cli-windows-<arch>-setup.exe
+        run: |
+          make installer-only VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=amd64
+          make installer-only VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=arm64
+
+      - name: Package portable zip (amd64 + arm64)
+        # zip is deterministic (scripts/zipfile pins entry metadata to the
+        # commit timestamp), so re-running it yields byte-identical archives.
+        run: |
+          make zip VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=amd64
+          make zip VERSION=${{ steps.ver.outputs.VERSION }} GOARCH=arm64
+
+      - name: Generate checksum
+        # GNU coreutils sha256sum format checksums.txt, shared by `civ upgrade`
+        # self-update and install.ps1 for download integrity verification.
+        # Both consumers match lines by bare file name and ignore the rest,
+        # so the setup exes can ride along in the same manifest.
+        shell: bash
+        run: |
+          cd dist
+          sha256sum \
+            civitai-cli-windows-amd64.zip \
+            civitai-cli-windows-arm64.zip \
+            civitai-cli-windows-amd64-setup.exe \
+            civitai-cli-windows-arm64-setup.exe > checksums.txt
+          echo "--- checksums.txt ---"
+          cat checksums.txt
+
+      - name: Attest build provenance
+        # Free keyless sigstore attestations signed via the workflow's OIDC
+        # identity: proof of which commit/workflow produced each asset.
+        # Verify locally with:
+        #   gh attestation verify --repo BaixuanZhu/civitai-cli <file>
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            dist/civitai-cli-windows-amd64-setup.exe
+            dist/civitai-cli-windows-arm64-setup.exe
+            dist/civitai-cli-windows-amd64.zip
+            dist/civitai-cli-windows-arm64.zip
+
+      - name: Extract release notes from CHANGELOG.md
+        # Pulls the section matching the current tag from CHANGELOG.md as the
+        # release body; falls back to auto-generated notes when the file is
+        # missing or has no matching section.
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "current version: $VERSION"
+          BODY=""
+          if [ -f CHANGELOG.md ]; then
+            # awk: print the section starting at "## [$VERSION]" up to the next "## [".
+            # The start match uses index() (literal prefix), not a dynamic regex:
+            # gawk treats a backslash-escaped bracket inside a dynamic regex string
+            # as a bracket-class opener, so the regex form silently never matches
+            # (empty notes -> needless fallback). index() is exact and portable
+            # across gawk/mawk; the end marker stays a static regex, where the
+            # escape is honored.
+            BODY=$(awk -v v="$VERSION" '
+              index($0, "## [" v "]") == 1 {found=1; next}
+              found && /^## \[/ {exit}
+              found {print}
+            ' CHANGELOG.md)
+          fi
+          if [ -n "$BODY" ]; then
+            {
+              echo "RELEASE_BODY<<EOF"
+              echo "$BODY"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+            echo "use_changelog=true" >> "$GITHUB_OUTPUT"
+            echo "--- release notes extracted from CHANGELOG.md ---"
+            echo "$BODY"
+          else
+            echo "no [$VERSION] section in CHANGELOG.md, falling back to auto-generated notes"
+            echo "use_changelog=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v3
+        with:
+          body: ${{ env.RELEASE_BODY }}
+          generate_release_notes: ${{ steps.notes.outputs.use_changelog != 'true' }}
+          files: |
+            dist/civitai-cli-windows-amd64-setup.exe
+            dist/civitai-cli-windows-arm64-setup.exe
+            dist/civitai-cli-windows-amd64.zip
+            dist/civitai-cli-windows-arm64.zip
+            dist/checksums.txt
+            install.ps1
+
+  verify-repro:
+    # Reproducibility proof: rebuild the portable exe from the tagged source
+    # on Linux (cross-compile, same pinned toolchain) and compare byte-for-
+    # byte with the published Windows-built asset. Equal hashes prove the
+    # release exe is exactly what the tagged source builds into -- no
+    # tampering after the build and no build-machine-specific bytes.
+    name: Verify reproducible build
+    runs-on: ubuntu-latest
+    needs: build-and-release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Rebuild from the tagged source (cross-compile)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          make build-dist VERSION="$VERSION" GOARCH=amd64
+          make build-dist VERSION="$VERSION" GOARCH=arm64
+
+      - name: Download published zips and compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p published
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'civitai-cli-windows-*.zip' --dir published
+          status=0
+          {
+            echo "## Reproducibility check (Linux rebuild vs published asset)"
+            echo ""
+            echo "| arch | local rebuild | published | verdict |"
+            echo "|---|---|---|---|"
+            for arch in amd64 arm64; do
+              unzip -o -q "published/civitai-cli-windows-${arch}.zip" -d "published/${arch}"
+              local_hash=$(sha256sum "dist/${arch}/civ.exe" | cut -d' ' -f1)
+              pub_hash=$(sha256sum "published/${arch}/civ.exe" | cut -d' ' -f1)
+              if [ "$local_hash" = "$pub_hash" ]; then verdict=match; else verdict=MISMATCH; status=1; fi
+              echo "| ${arch} | \`${local_hash}\` | \`${pub_hash}\` | ${verdict} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

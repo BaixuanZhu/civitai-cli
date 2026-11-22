@@ -1,0 +1,32 @@
+{
+  "id": "civitai-cli-go",
+  "name": "civitai-cli-go",
+  "title": "Civitai CLI (civ) Go 工具开发",
+  "description": "基于 I:/GitDownload/PixAI/civitai-cli-规划.md 从零开发 Go 标准库-only 的 Civitai 模型搜索/审卡 CLI（civ）：search/show/vet/sync/tags/login 六命令、httptest 零外网测试、参考 danbooru-tag-mcp 的 GitHub Actions CI/自动发布/集成测试/自更新/NSIS 安装包。按 M1-M4 里程碑拆子任务。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-22-civ-m1-core",
+    "11-22-civ-m2-vet",
+    "11-22-civ-m3-sync-login",
+    "11-22-civ-m4-release",
+    "11-22-civ-m5-docs"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

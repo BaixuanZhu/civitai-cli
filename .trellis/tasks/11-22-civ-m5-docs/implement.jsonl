@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/civitai-cli-plan.md", "reason": "README 命令示例与 §10 验收核对的事实源；docs/plan.md 迁移原文"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/danbooru-code-org.md", "reason": "README 结构蓝本（Install 三选项/环境变量表/可复现构建章节）"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/design.md", "reason": "偏差决策注记依据（D6 -v 冲突/images.go 省略/hashcache 兼放）"}

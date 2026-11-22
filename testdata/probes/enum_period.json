@@ -1,0 +1,1 @@
+{"error":{"name":"ZodError","message":"[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"Day\",\n      \"Week\",\n      \"Month\",\n      \"Year\",\n      \"AllTime\"\n    ],\n    \"path\": [\n      \"period\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"Day\\\"|\\\"Week\\\"|\\\"Month\\\"|\\\"Year\\\"|\\\"AllTime\\\"\"\n  }\n]"}}

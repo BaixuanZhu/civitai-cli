@@ -1,0 +1,30 @@
+# Normalize line endings: force LF in the working tree on every platform.
+# Windows autocrlf causes phantom "modified" files and $'\r': command not
+# found errors in Git Bash / CI shell scripts.
+* text=auto eol=lf
+
+# Explicit text rules for source and script files.
+*.go text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.nsi text eol=lf
+*.ps1 text eol=lf
+Makefile text eol=lf
+LICENSE text eol=lf
+
+# Binary artifacts must never be touched by EOL conversion.
+*.exe binary
+*.zip binary
+
+# Trellis: append-only developer journals should merge cleanly across
+# parallel sessions/worktrees — each session only appends a new block, so
+# there is nothing to actually conflict on.
+#
+# Do NOT add a rule for workspace/*/index.md here — it is fully regenerated
+# every session, so a real conflict there is expected and safe to resolve by
+# picking either side (task state lives in task.json, not index.md). See
+# .trellis/spec/cli/backend/directory-structure.md for details.
+.trellis/workspace/*/journal-*.md merge=union

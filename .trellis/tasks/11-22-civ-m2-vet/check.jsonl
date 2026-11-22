@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/civitai-cli-plan.md", "reason": "验收对照：§4.3 报告格式与退出码语义"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/design.md", "reason": "全局契约，检查错误分类/退出码/容错解码是否偏离"}
+{"file": ".trellis/spec/guides/index.md", "reason": "跨层/复用思考指南与 AI 审查假阳性防范"}

@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/11-22-civitai-cli-go/research/civitai-cli-plan.md", "reason": "验收对照：§4.4 sync 输出行/并发上限、§4.6 token 优先级、§10 性能标准"}
+{"file": ".trellis/tasks/11-22-civitai-cli-go/design.md", "reason": "全局契约 D8，检查缓存失效/原子写/并发模型是否偏离"}
+{"file": ".trellis/spec/guides/index.md", "reason": "跨层/复用思考指南与 AI 审查假阳性防范"}

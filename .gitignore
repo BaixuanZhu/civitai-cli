@@ -1,0 +1,18 @@
+# Build artifacts
+/dist/
+
+# Trellis session runtime state (per-developer, never committed)
+.trellis/.developer
+.trellis/.runtime/
+
+# Integration-test scratch dirs (repo-relative, removed on exit by the script)
+/.integration-work/
+/.integration-models/
+
+# Tool-generated index and IDE/platform configs (machine-specific)
+/.codegraph/
+/.qoder/
+/.zcode/
+
+# Per-developer Trellis workspace (journals / session traces)
+.trellis/workspace/
