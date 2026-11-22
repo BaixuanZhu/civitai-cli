@@ -9,6 +9,16 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [0.1.1] - 2026-11-22
+
+### Fixed
+
+- Uninstall now removes the install directory from the user `PATH`. The NSIS
+  uninstaller previously left a dead `PATH` entry behind; it now runs the
+  internal `civ unbootstrap` command (`env.RemoveUserPath`) before deleting the
+  exe, reusing the same safe registry write path as the install bootstrap
+  (no `setx`/NSIS string truncation of long `PATH` values).
+
 ## [0.1.0] - 2026-11-22
 
 ### Added
