@@ -1,0 +1,357 @@
+package cmd
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"civitai-cli/internal/app"
+	"civitai-cli/internal/report"
+	"civitai-cli/internal/skill"
+)
+
+// Skill runs the skill command: civ skill <install|remove|update> [flags]. It
+// installs, removes, or updates the bundled civ-prompt Agent Skill across the
+// claude / zcode / codex platforms. With --platform it runs non-interactively;
+// without it, it prompts on stderr (detected platforms preselected) and reads
+// choices from stdin. Output is a human summary or --json []Result. This is a
+// purely local file operation (no network). Exit codes: 0 success, 1 usage error
+// (unknown action, invalid platform/scope, or interactive cancel).
+func Skill(args []string) {
+	var o skillOptions
+	execute("skill", args, o.register, func(ctx context.Context, g *globals, pos []string) error {
+		return runSkill(ctx, g, pos, &o, os.Stdin)
+	})
+}
+
+// skillOptions carries the skill-specific flags.
+type skillOptions struct {
+	platform string
+	scope    string
+	force    bool
+}
+
+// register binds the skill flags to fs.
+func (o *skillOptions) register(fs *flag.FlagSet) {
+	fs.StringVar(&o.platform, "platform", "", "target platforms: claude,zcode,codex or all (omit for interactive selection)")
+	fs.StringVar(&o.scope, "scope", "user", "install scope: user (global home) or project (current directory)")
+	fs.BoolVar(&o.force, "force", false, "overwrite an existing skill without prompting")
+}
+
+// skillPlatformMenu is the fixed display order for interactive selection.
+var skillPlatformMenu = []skill.Platform{skill.PlatformClaude, skill.PlatformZcode, skill.PlatformCodex}
+
+// runSkill is the pure skill implementation with an injectable stdin so tests
+// can drive the interactive flow with a strings.Reader (no terminal). It
+// validates the action and scope, resolves platforms (flag or interactive),
+// dispatches to internal/skill, and renders the results.
+func runSkill(ctx context.Context, g *globals, pos []string, o *skillOptions, stdin io.Reader) error {
+	if len(pos) != 1 {
+		return errors.New("skill requires one action: install, remove, or update")
+	}
+	action := pos[0]
+	switch action {
+	case "install", "remove", "update":
+	default:
+		return fmt.Errorf("unknown skill action %q; want install, remove, or update", action)
+	}
+
+	scope := skill.Scope(strings.ToLower(strings.TrimSpace(o.scope)))
+	switch scope {
+	case skill.ScopeUser, skill.ScopeProject:
+	default:
+		return fmt.Errorf("unknown --scope %q; want user or project", o.scope)
+	}
+
+	var platforms []skill.Platform
+	var conflict skill.ConflictFunc
+	if strings.TrimSpace(o.platform) == "" {
+		// Interactive: one scanner drives platform, scope, confirmation, and
+		// any per-conflict prompts so reads stay sequential on the same stdin.
+		p := &skillPrompter{sc: bufio.NewScanner(stdin), out: os.Stderr}
+		var err error
+		platforms, scope, err = p.selectPlatformsAndScope(action, scope)
+		if err != nil {
+			return err
+		}
+		if action == "install" {
+			conflict = p.conflictFunc()
+		}
+	} else {
+		var err error
+		platforms, err = parsePlatforms(o.platform)
+		if err != nil {
+			return err
+		}
+	}
+
+	// The codex advisory concerns writing to the shared .agents/skills root,
+	// so it only applies to install/update, not remove.
+	if action == "install" || action == "update" {
+		warnUndetectedCodex(platforms)
+	}
+
+	opts := skill.Options{
+		Platforms: platforms,
+		Scope:     scope,
+		Force:     o.force,
+		Out:       os.Stderr,
+		Conflict:  conflict,
+	}
+	var results []skill.Result
+	var err error
+	switch action {
+	case "install":
+		results, err = skill.Install(opts)
+	case "remove":
+		results, err = skill.Remove(opts)
+	case "update":
+		results, err = skill.Update(opts)
+	}
+	if err != nil {
+		return err
+	}
+	return renderSkillResults(g, action, results)
+}
+
+// parsePlatforms canonicalizes the comma-separated --platform value ("all"
+// expands to every platform). Unknown names are usage errors; duplicates are
+// collapsed preserving first-seen order.
+func parsePlatforms(s string) ([]skill.Platform, error) {
+	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, "all") {
+		return append([]skill.Platform(nil), skillPlatformMenu...), nil
+	}
+	var out []skill.Platform
+	seen := make(map[skill.Platform]bool)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part == "" {
+			continue
+		}
+		p := skill.Platform(part)
+		switch p {
+		case skill.PlatformClaude, skill.PlatformZcode, skill.PlatformCodex:
+		default:
+			return nil, fmt.Errorf("unknown --platform %q; want claude, zcode, codex, or all", part)
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("--platform must list at least one of claude, zcode, codex (or all)")
+	}
+	return out, nil
+}
+
+// warnUndetectedCodex notes when codex was requested but not detected: the skill
+// is still written to the shared ~/.agents/skills root and becomes effective once
+// codex is installed (prd R12). The warning never blocks the write.
+func warnUndetectedCodex(platforms []skill.Platform) {
+	selected := false
+	for _, p := range platforms {
+		if p == skill.PlatformCodex {
+			selected = true
+		}
+	}
+	if !selected {
+		return
+	}
+	for _, p := range skill.DetectPlatforms() {
+		if p == skill.PlatformCodex {
+			return // detected, no warning
+		}
+	}
+	app.Warnf("codex not detected; civ-prompt is written to the shared .agents/skills root and takes effect once codex is installed")
+}
+
+// renderSkillResults writes the per-platform outcomes: a --json array, or a
+// human summary line (action, platform, path) per result. An update that found
+// no installed skill adds a stderr hint to install first.
+func renderSkillResults(g *globals, action string, results []skill.Result) error {
+	if g.JSON {
+		return report.WriteIndent(g.stdout(), results)
+	}
+	for _, r := range results {
+		fmt.Fprintf(g.stdout(), "%-10s %-7s %s\n", r.Action, r.Platform, r.Path)
+		if action == "update" && r.Action == skill.ActionNotFound {
+			fmt.Fprintf(os.Stderr, "hint: no civ-prompt installed for %s; run civ skill install first\n", r.Platform)
+		}
+	}
+	return nil
+}
+
+// skillPrompter drives the interactive flow over a single stdin scanner, writing
+// prompts to out (stderr). It mirrors login's stdin-parameterized pattern so the
+// whole flow is testable with a strings.Reader.
+type skillPrompter struct {
+	sc  *bufio.Scanner
+	out io.Writer
+}
+
+// ask prints a prompt and reads one trimmed line. EOF or a read error cancels
+// the interaction (mapped to exit 1 by the runner).
+func (p *skillPrompter) ask(prompt string) (string, error) {
+	fmt.Fprint(p.out, prompt)
+	if !p.sc.Scan() {
+		if err := p.sc.Err(); err != nil {
+			return "", fmt.Errorf("skill: read stdin: %w", err)
+		}
+		return "", errors.New("skill: interactive selection canceled (no input)")
+	}
+	return strings.TrimSpace(p.sc.Text()), nil
+}
+
+// selectPlatformsAndScope runs the interactive platform menu (detected platforms
+// preselected), scope choice (default user), and a confirmation showing the
+// target paths. Canceling the confirmation returns an error (exit 1).
+func (p *skillPrompter) selectPlatformsAndScope(action string, defaultScope skill.Scope) ([]skill.Platform, skill.Scope, error) {
+	detected := skill.DetectPlatforms()
+	detectedSet := make(map[skill.Platform]bool)
+	for _, d := range detected {
+		detectedSet[d] = true
+	}
+
+	fmt.Fprintf(p.out, "Select platforms for civ skill %s:\n", action)
+	for i, pl := range skillPlatformMenu {
+		mark := ""
+		if detectedSet[pl] {
+			mark = "  [detected]"
+		}
+		root, _ := skill.RootFor(pl, defaultScope)
+		fmt.Fprintf(p.out, "  %d) %-7s %s%s\n", i+1, pl, root, mark)
+	}
+	ans, err := p.ask("Platforms (numbers/names, 'all', or Enter for detected): ")
+	if err != nil {
+		return nil, "", err
+	}
+	platforms, err := parseInteractivePlatforms(ans, detected)
+	if err != nil {
+		return nil, "", err
+	}
+
+	scopeAns, err := p.ask(fmt.Sprintf("Scope [user/project] (default %s): ", defaultScope))
+	if err != nil {
+		return nil, "", err
+	}
+	scope := defaultScope
+	if scopeAns != "" {
+		switch skill.Scope(strings.ToLower(scopeAns)) {
+		case skill.ScopeUser:
+			scope = skill.ScopeUser
+		case skill.ScopeProject:
+			scope = skill.ScopeProject
+		default:
+			return nil, "", fmt.Errorf("unknown scope %q; want user or project", scopeAns)
+		}
+	}
+
+	fmt.Fprintln(p.out, "Target paths:")
+	for _, pl := range platforms {
+		root, err := skill.RootFor(pl, scope)
+		if err != nil {
+			return nil, "", err
+		}
+		fmt.Fprintf(p.out, "  %s: %s\n", pl, filepath.Join(root, skill.SkillName))
+	}
+	confirm, err := p.ask("Proceed? [y/N]: ")
+	if err != nil {
+		return nil, "", err
+	}
+	if !skillIsYes(confirm) {
+		return nil, "", errors.New("skill: canceled by user")
+	}
+	return platforms, scope, nil
+}
+
+// conflictFunc returns the install conflict decision callback: it prompts
+// overwrite/skip/backup for an existing skill (default skip). A read failure
+// mid-conflict defaults to the safe skip rather than aborting the whole run.
+func (p *skillPrompter) conflictFunc() skill.ConflictFunc {
+	return func(path, installed string) string {
+		v := installed
+		if v == "" {
+			v = "unknown"
+		}
+		fmt.Fprintf(p.out, "civ-prompt already exists at %s (version %s).\n", path, v)
+		ans, err := p.ask("Overwrite, skip, or backup? [overwrite/skip/backup] (default skip): ")
+		if err != nil {
+			return "skip"
+		}
+		switch strings.ToLower(ans) {
+		case "overwrite", "o":
+			return "overwrite"
+		case "backup", "b":
+			return "backup"
+		default:
+			return "skip"
+		}
+	}
+}
+
+// parseInteractivePlatforms interprets the platform menu answer: empty accepts
+// the detected preselection, "all" selects every platform, and a comma/space
+// list mixes 1-based menu numbers with platform names. An empty answer with
+// nothing detected is an error (the user must choose explicitly).
+func parseInteractivePlatforms(ans string, detected []skill.Platform) ([]skill.Platform, error) {
+	ans = strings.TrimSpace(ans)
+	if ans == "" {
+		if len(detected) == 0 {
+			return nil, errors.New("no platforms detected; enter numbers/names or 'all' (or use --platform)")
+		}
+		return detected, nil
+	}
+	if strings.EqualFold(ans, "all") {
+		return append([]skill.Platform(nil), skillPlatformMenu...), nil
+	}
+	var out []skill.Platform
+	seen := make(map[skill.Platform]bool)
+	tokens := strings.FieldsFunc(ans, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })
+	for _, tok := range tokens {
+		tok = strings.ToLower(strings.TrimSpace(tok))
+		if tok == "" {
+			continue
+		}
+		var pl skill.Platform
+		if n, err := strconv.Atoi(tok); err == nil {
+			if n < 1 || n > len(skillPlatformMenu) {
+				return nil, fmt.Errorf("invalid platform number %q; want 1-%d", tok, len(skillPlatformMenu))
+			}
+			pl = skillPlatformMenu[n-1]
+		} else {
+			pl = skill.Platform(tok)
+			switch pl {
+			case skill.PlatformClaude, skill.PlatformZcode, skill.PlatformCodex:
+			default:
+				return nil, fmt.Errorf("unknown platform %q; want claude, zcode, codex, a number 1-%d, or all", tok, len(skillPlatformMenu))
+			}
+		}
+		if !seen[pl] {
+			seen[pl] = true
+			out = append(out, pl)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no platforms selected")
+	}
+	return out, nil
+}
+
+// skillIsYes reports whether a confirmation answer is affirmative.
+func skillIsYes(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
+}

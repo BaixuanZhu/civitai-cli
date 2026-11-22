@@ -52,14 +52,17 @@ civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.l
 
 ## Features
 
-- **Six core commands** — `search`, `show`, `vet`, `sync`, `tags`,
-  `login`/`logout` — plus `upgrade`, `version`, and `help`.
+- **Core commands** — `search`, `show`, `vet`, `sync`, `tags`, `login`/`logout`,
+  and `skill` — plus `upgrade`, `version`, and `help`.
 - **Vetting flagship** — `vet` accepts a file path, a 64-char SHA256, or a
   10-char AutoV2; `sync` batch-audits a directory with a size/mtime hash cache,
   duplicate detection, and CSV/JSON/table output.
 - **Example-image recipes** — `--prompts` on `show -v` and `vet` prints
   copyable prompt / negativePrompt / steps / cfgScale / sampler / scheduler
   blocks (and counts images whose meta is null).
+- **Bundled Agent Skill** — `civ skill install` ships the embedded `civ-prompt`
+  skill to claude / zcode / codex, teaching coding agents to build text-to-image
+  prompts from real Civitai trigger words and example-image recipes.
 - **Self-update** — `civ upgrade` pulls the latest GitHub Release, verifies
   SHA256 against `checksums.txt`, and swaps the binary via a same-volume `.bak`
   rename with rollback.
@@ -293,6 +296,66 @@ Checks the latest GitHub Release of `BaixuanZhu/civitai-cli`, compares versions
 `civitai-cli-windows-<arch>.zip`, verifies SHA256 against `checksums.txt`, and
 replaces the running exe via a `.bak` rename (with rollback on failure).
 Leftover `.bak` files are cleaned on every startup.
+
+### `civ skill <action>` — install the civ-prompt Agent Skill
+
+```bash
+civ skill install                          # interactive: pick platforms + scope, confirm
+civ skill install --platform claude,zcode,codex --scope user
+civ skill install --platform all --force   # non-interactive, overwrite an existing copy
+civ skill update --platform claude         # rewrite only when the version differs
+civ skill remove --platform zcode          # delete the skill directory
+civ skill install --platform codex --json  # machine-readable [{platform,path,action}]
+```
+
+`civ skill` installs, removes, and updates **civ-prompt**, a bundled
+[Agent Skills](https://agentskills.io) skill that teaches a coding agent to craft
+text-to-image prompts from real Civitai data: the trigger words (`trainedWords`)
+that activate a LoRA, plus example-image recipes (prompt / negativePrompt / steps /
+cfgScale / sampler / scheduler) gathered via `civ vet/show/search --prompts --json`.
+The skill tree is embedded in the binary (`go:embed`), so any installed `civ` can
+install it without the repository source on disk. This is a purely local file
+operation — no network.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--platform` | none | `claude`, `zcode`, `codex` (comma-separated) or `all`. **Omit for interactive selection.** |
+| `--scope` | `user` | `user` (global home) or `project` (current directory). |
+| `--force` | off | Overwrite an existing skill without prompting. |
+| `--json` | off | Emit a `[{platform,path,action}]` array instead of the human summary. |
+
+**Platform → skill root.** Each platform gets a real copy in its native root (no
+symlinks, so Windows needs no elevated privileges):
+
+| Platform | user scope | project scope |
+|---|---|---|
+| `claude` | `~/.claude/skills/civ-prompt/` | `<cwd>/.claude/skills/civ-prompt/` |
+| `zcode` | `~/.zcode/skills/civ-prompt/` | `<cwd>/.zcode/skills/civ-prompt/` |
+| `codex` | `~/.agents/skills/civ-prompt/` | `<cwd>/.agents/skills/civ-prompt/` |
+
+> codex reads the shared `.agents/skills/` root, **not** `.codex/skills/`. When both
+> zcode and codex are selected, each gets its own native copy (zcode then sees two;
+> its `.zcode/skills` copy takes priority). If codex is not detected, the skill is
+> still written to `.agents/skills/` and takes effect once codex is installed — a
+> stderr warning notes this.
+
+**Interactive mode** (no `--platform`): civ detects installed platforms
+(`~/.claude`, `~/.zcode`, `~/.codex`/`~/.agents`, or binaries on PATH), preselects
+them, and prompts on stderr for a numbered multi-select, a scope (default `user`),
+and a confirmation showing the target paths. Canceling exits `1`. When the target
+already exists, install prompts `overwrite` / `skip` / `backup` (default `skip`;
+`backup` renames the old directory to `civ-prompt.bak`). `--force` overwrites
+without prompting. The `civ-prompt.bak` backup is kept for safety; its `name` no
+longer matches the directory name, so platform skill scanners ignore it (it is not
+loaded as a duplicate). `remove` deletes only the active `civ-prompt/` — delete any
+leftover `.bak` manually if you want it gone.
+
+**Actions reported:** `installed`, `updated`, `up-to-date`, `skipped`, `removed`,
+`backed-up`, `not-found`. `update` compares the installed `metadata.version`
+against the running civ version and rewrites only when they differ (or `--force`),
+preserving the skill name. `remove` deletes only `civ-prompt/` and never touches
+zcode's `.skills_store_lock.json`. Exit codes: `0` success, `1` usage error
+(unknown action, invalid platform/scope, or interactive cancel).
 
 ### `civ version` / `civ help`
 

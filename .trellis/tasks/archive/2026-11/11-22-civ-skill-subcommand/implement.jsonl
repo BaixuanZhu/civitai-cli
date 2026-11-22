@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/11-22-civ-skill-subcommand/research/platform-skill-conventions.md", "reason": "三平台 skill 根目录映射 + agentskills.io 标准六字段规范 + 冲突/版本/探测设计建议（实证）"}
+{"file": ".trellis/tasks/11-22-civ-skill-subcommand/research/codex-skill-uncertainty.md", "reason": "codex 读 .agents/skills 非 .codex/skills 的结论 + 本机未装的残留不确定性"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "分层约定：main 仅路由、internal 叶子包、依赖方向"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "零依赖/全英文/GoDoc/httptest 零外网/表驱动测试约定"}

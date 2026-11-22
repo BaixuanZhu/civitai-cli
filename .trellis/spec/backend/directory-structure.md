@@ -49,7 +49,7 @@ civitai-cli/
 │   ├── cmd/                # command handlers: flag parse -> api -> report -> exit code
 │   │   ├── globals.go      #   globals, registerGlobalFlags, execute/executeWithExitCode,
 │   │   │                   #   exitCodeFor, printErrorHint, permuteArgs, newAPIClient seam
-│   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go
+│   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go
 │   ├── config/             # leaf: token persistence + priority resolution
 │   │   └── config.go       #   Path/Load/Save/Delete/ResolveToken
 │   ├── hashcache/          # leaf: streaming SHA256 + size/mtime cache
@@ -62,6 +62,11 @@ civitai-cli/
 │   │   └── path_windows.go #   EnsureUserPath/Persist (HKCU\Environment + WM_SETTINGCHANGE)
 │   ├── upgrade/            # self-update from GitHub Releases
 │   │   └── upgrade.go      #   Run, compareVersions, parseChecksum, replaceExeAt, CleanupStaleBak
+│   ├── skill/              # leaf: bundled civ-prompt Skill (go:embed) + multi-platform install
+│   │   ├── embed.go        #   //go:embed assets/civ-prompt -> FS; SkillName const
+│   │   ├── skill.go        #   Platform/Scope, RootFor, DetectPlatforms, version render/extract
+│   │   ├── install.go      #   Install/Remove/Update, ConflictFunc, Result (pure file ops)
+│   │   └── assets/civ-prompt/  # SKILL.md (standard six fields) + references/ (embedded source)
 │   └── testutil/           # shared test helpers (no production import)
 └── testdata/               # verbatim live fixtures + probes/ + FIXTURES.md manifest
 ```
@@ -78,18 +83,21 @@ main.go (dispatch + global-flag assembly + startup maintenance)
        ├─ internal/api       (Client.Get choke point + endpoint methods + types + errors)
        ├─ internal/report    (tabwriter / JSON / k-M / date / truncate / console width)
        ├─ internal/hashcache (ComputeSHA256 + Cache)
-       └─ internal/config    (token read/write + ResolveToken)
-  infrastructure: internal/app (leaf), internal/env (leaf), internal/upgrade
+       ├─ internal/config    (token read/write + ResolveToken)
+       └─ internal/skill     (bundled civ-prompt Skill: embed + install/remove/update)
+  infrastructure: internal/app (leaf), internal/env (leaf), internal/upgrade, internal/skill (leaf)
 ```
 
 - `internal/app` is a **leaf**: it imports nothing from `internal/`, so `api`,
   `cmd`, `config`, `hashcache`, and `upgrade` can all depend on it without an
   import cycle. It holds `Version`, `Fail`, `UserAgent`, the leveled logger, and
   the `Bootstrap` gate.
-- `internal/env`, `internal/report`, `internal/hashcache`, `internal/config` are
-  leaves (or depend only on `app`). `env` is Windows-only (`path_windows.go`
-  suffix gates compilation) and uses hand-written `syscall` (no
-  `golang.org/x/sys`) to keep the zero-dependency contract.
+- `internal/env`, `internal/report`, `internal/hashcache`, `internal/config`,
+  `internal/skill` are leaves (or depend only on `app`). `env` is Windows-only
+  (`path_windows.go` suffix gates compilation) and uses hand-written `syscall`
+  (no `golang.org/x/sys`) to keep the zero-dependency contract. `skill` embeds
+  its `assets/civ-prompt` tree via `go:embed` and does pure file operations
+  (hand-written frontmatter version extraction, no YAML library).
 - `internal/upgrade` depends on `app` only; `main` calls `upgrade.Run()` for the
   `upgrade` command and `upgrade.CleanupStaleBak()` at startup.
 
@@ -129,6 +137,7 @@ exit-code and rendering behavior table-testable offline.
 | Rendering primitive | `internal/report` | no API knowledge |
 | Cross-cutting infra | `internal/app` | leaf, no `internal/` imports |
 | Token persistence | `internal/config` | leaf; `cmd` calls `ResolveToken` at the seam |
+| Bundled Skill management | `internal/skill` | leaf; `go:embed` source in `assets/`; pure file ops + `ConflictFunc` callback; `cmd/skill` owns interactive/flag UX |
 
 ---
 

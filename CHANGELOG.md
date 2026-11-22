@@ -30,6 +30,15 @@ awk extraction — do not change it casually.
 - `civ login` / `civ logout`: store and clear the API token under
   `%APPDATA%\civ\config.json`; token precedence is `--token` >
   `CIVITAI_API_KEY` > config.
+- `civ skill install|remove|update`: install, remove, and update the bundled
+  **civ-prompt** Agent Skill across claude (`~/.claude/skills`), zcode
+  (`~/.zcode/skills`), and codex (`~/.agents/skills`, never `.codex/skills`).
+  Interactive platform/scope selection with detected-platform preselect, or
+  non-interactive `--platform claude,zcode,codex|all --scope user|project --force`;
+  conflict overwrite/skip/backup, version-aware update, `--json` results, and real
+  per-platform copies (no symlinks). The skill tree is embedded via `go:embed`, so
+  every installed civ carries it. civ-prompt grounds text-to-image prompts in real
+  Civitai trigger words and example-image recipes (`civ vet/show/search --prompts`).
 - Resilient API client: a single outbound chokepoint with bounded retry
   (5xx / network / 429, `Retry-After` honored), a concurrency gate, shrunken
   error bodies, and tolerant JSON decoding for upstream schema drift.

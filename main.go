@@ -54,6 +54,8 @@ func main() {
 		cmd.Login(os.Args[2:])
 	case "logout":
 		cmd.Logout(os.Args[2:])
+	case "skill":
+		cmd.Skill(os.Args[2:])
 	case "upgrade":
 		upgrade.Run()
 	case "version", "-v", "--version":
@@ -82,6 +84,7 @@ Commands:
   tags <query>     Tag name completion (--limit)
   login            Save an API token (validated via a favorites probe)
   logout           Remove the saved API token
+  skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
   upgrade          Self-update from the latest GitHub Release
   version          Print the civ version
   help             Print this help
