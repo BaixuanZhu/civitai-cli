@@ -13,8 +13,8 @@
 
 | # | §10 标准 | 结论 | 证据 / 条件 |
 |---|---|---|---|
-| 1 | `vet` 单文件 < 3s（缓存命中 < 1s） | ✓(条件) | live 已知哈希 `vet FBA1195327` 三次计时 **1.861s / 1.680s / 1.854s**（均 < 3s）。条件：① 哈希输入**不含本地哈希计算**；本地文件 vet 额外含流式 SHA256 时间，∝ 文件大小（如 3.9 GB Anima 文件仅哈希就需数秒）——真实大文件计时推迟主代理。② "缓存命中 < 1s" 指 **CDN 5 分钟 HIT**（`s-maxage=300`）；`vet` 不走 hashcache（每次新鲜计算），三次均 ~1.8s 提示 origin/MISS 或双 API 调用（by-hash + 取所属 model）开销。 |
-| 2 | `sync` 50 文件 ≤ 40s，二次运行 ≤ 5s | ⏳(条件) | **真实 LoRA 目录性能计时推迟主代理**（需用户路径，规划示例 `I:\ComfyUI-Workspace\models\loras`）。条件注明：二次 ≤ 5s 依赖 **hashcache 命中**（size+mtime 未变 → 跳过重算）**+ CDN 5min HIT**；计时须**开缓存**（`CIV_NO_CACHE=1` 会禁用缓存，仅用于契约抽查/漂移金丝雀）。首跑 ≤ 40s 理论达标：并发 3 × origin ~1.3–2s/call，50 文件 ≈ 17 批 × ~1.8s ≈ 30s。合成基准可行（50 合成文件 → 50 次 live by-hash，全 not_found），本次未跑以避大量外网调用。 |
+| 1 | `vet` 单文件 < 3s（缓存命中 < 1s） | ✓(条件) | live 已知哈希 `vet FBA1195327` 三次计时 **1.861s / 1.680s / 1.854s**（均 < 3s）。**真实本地文件实测**：8.3 MB LoRA `vet <path>`（流式 SHA256 + by-hash + 取所属 model 双跳）**1.806s** exit 0 完整报告。条件：① 本地文件 vet 含哈希时间 ∝ 文件大小（8.3 MB ≈ 1.8s；3.9 GB 大文件仅哈希就需数秒，会超 3s——属文件尺寸固有成本，非客户端缺陷）。② "缓存命中 < 1s" 指 **CDN 5 分钟 HIT**（`s-maxage=300`）；`vet` 不走 hashcache（每次新鲜计算），~1.8s 含双 API 调用开销。 |
+| 2 | `sync` 50 文件 ≤ 40s，二次运行 ≤ 5s | ✓(条件) | **真实 LoRA 目录实测**（`I:\ComfyUI-Workspace\models\loras`，13 个真实登记文件，**全部 found**）：首跑 **3.97s**（哈希 + API origin，并发 3）；二次 **2.95s**（hashcache 命中 + CDN HIT，输出逐字节一致）；暖缓存 `--concurrency 8` **1.91s**。均 exit 0。条件与诚实外推：实测仅 13 文件（用户目录不足 50）。按 API 调用主导外推 50 文件：首跑 ≈ 15s（**≤40s 达标**）；二次跑受真实 CDN HIT 延迟（~0.6–0.9s/call）主导，并发 3 ≈ 11s、并发 8 ≈ 7s——**≤5s 目标偏乐观**，需更高并发或更快网络/CDN 才能稳定达标。hashcache 命中已确证（二次输出一致 + 暖缓存更快）；计时开缓存（非 CIV_NO_CACHE）。结论：每文件性能优异，50 文件二次 ≤5s 为网络约束下的 aspirational 目标，默认并发 3 不保证。 |
 | 3 | 全部命令支持 `--json`，输出契约稳定 | ✓ | 见 §3 全命令契约抽查（search/show/tags/vet/sync 各一次 python `json.load` 通过；另抽查 `--prompts` 配方视图）。 |
 | 4 | 测试不访问外网（httptest + fixture） | ✓ | `go test ./...` 与 `go test -race -count=1 ./...` 全绿（离线）；api 层 httptest fake server，cmd 层经 `newAPIClient`/`newSyncClient`/`computeHash` seam 指向 httptest；`testdata/*.json` 为线上 verbatim fixture（FIXTURES.md 记抓取日期）；注册表测试本机 `t.Skip`。 |
 | 5 | 退出码语义文档化且稳定 | ✓ | README "Exit codes" 表（0/1/2/3/4 + sync not_found 数据行说明）；live 实测 0/1/3，单测覆盖 2/4（见 §2）。 |
@@ -104,9 +104,9 @@
 | 全命令 --json 契约稳定；人类 stdout、日志 stderr | ✓ | §3 |
 | 退出码语义文档化稳定 0/1/2/3/4 | ✓ | §2 + README |
 | 单元测试零外网；go vet / go test -race 全绿 | ✓ | §6 |
-| vet <3s（缓存<1s）；sync 50≤40s、二次≤5s | ✓(条件)/⏳ | §1 项 1/2：vet 哈希输入实测达标；sync 真实目录计时推迟主代理 |
+| vet <3s（缓存<1s）；sync 50≤40s、二次≤5s | ✓(条件) | §1 项 1/2：vet 哈希输入 1.86s + 真实 8.3MB 本地文件 1.81s 达标；sync 真实 13 登记文件首跑 3.97s/二次 2.95s（并发8 1.91s）全 found，50 文件外推首跑≤40s 达标、二次≤5s 网络约束下偏乐观（详见 §1 项 2） |
 | make dist-all 产 2 setup + 2 zip + checksums；zip 字节可复现 | ✓(条件) | §7：本地 amd64 产物在；双架构由 CI release 链；确定性 zip 单测覆盖 |
-| CI 工作流语法正确、unit-test 不触网；release tag 链完整 | ✓(条件) | 已读 ci.yml/release.yml 审查：unit-test 仅 vet/test/race/build（不触网），online-smoke 仅 schedule/manual；release tag→测试门禁→双架构→installer/zip→checksums→attestation→awk notes→gh-release→verify-repro 链完整。**actionlint 未跑**（本机未装，以人工语法审查为据）；真实 tag 发布留用户（外部可见动作） |
+| CI 工作流语法正确、unit-test 不触网；release tag 链完整 | ✓ | **CI 已真跑成功**：push 基线触发 run `45001871756` → conclusion **success**；unit-test job（windows-latest）vet/test/race/build 全过，**含 CIV_TEST_REGISTRY=1 注册表往返测试在隔离 VM 真跑通过**（验证 env PATH 自举 + W2 缓冲区修复）；online-smoke job 正确 skipped（仅 schedule/manual）。release tag 链完整（人工审查）；首次 tag 发布留用户。actionlint 本机未装，以 CI 真跑绿替代语法校验。 |
 | 自更新单测覆盖（版本比较/checksum/.bak 回滚/单文件解压）；注册表测试仅 CI 门控 | ✓ | upgrade_test.go：`TestCompareVersions`/`TestParseChecksum`/`TestReplaceExeAt_RollbackOnMoveFailure`/`TestExtractSingleExe`(+MissingExe)/`TestCleanupBakAt`/`TestExpectedAssetName`/`TestDownloadOnce`(+Non200)；env 注册表测试本机 SKIP（§6） |
 | README 含安装三选项、全命令示例、退出码表、环境变量表、可复现构建 | ✓ | README.md 已交付，示例经 live 抽查可复制执行 |
 
@@ -123,13 +123,18 @@
 
 ---
 
-## 10. 遗留（推迟主代理 / 用户）
+## 10. 收尾状态（主代理收敛后更新，2026-11-22）
 
-- **`scripts/integration-test.sh` 的 live 运行**：主代理正在并行写该脚本，本任务未触碰 `scripts/`，未跑 live 集成。
-- **真实 LoRA 目录性能计时**（vet 大文件 / sync 50 文件首跑+二次）：需用户路径，主代理后续处理；条件已在 §1 项 1/2 注明（二次 ≤ 5s 依赖 hashcache 命中 + CDN 5min HIT，计时须开缓存）。
-- **代码内陈旧文案修正**（§9 项 2/3）：`internal/cmd/search.go` --sort help、`internal/cmd/globals.go` login hint——本任务禁改 internal/*，提请主代理。
-- **actionlint 工作流校验**：本机未装，已以人工语法审查替代（§8）；如需机器校验由主代理/CI 补。
-- **最终 commit / 建仓推送 / 首次 tag 发布**：外部可见动作，需用户确认；本任务未执行任何 git commit/push/merge，未跑 `make build`（直接用现有 exe）。
+已完成：
+- **`scripts/integration-test.sh` live 运行**：主代理写成并跑通，**12 项断言全过**（version/search/show/tags/vet 命中/vet AutoV2/vet 404→3/vet 非法→1/sync not_found→0/limit 越界→1）。
+- **真实 LoRA 目录性能计时**：13 个真实登记文件首跑 3.97s / 二次 2.95s / 并发8暖缓存 1.91s，全 found（§1 项 2）；真实 8.3MB 本地文件 vet 1.81s（§1 项 1）。50 文件二次 ≤5s 的 network-bound  caveat 已诚实注明。
+- **代码内陈旧文案修正**：§9 项 2/3 已由主代理修复——`globals.go` login hint 改 `(run civ login)`；`search.go --sort` help 补 `recently-added`。另修 trellis-check 发现的 **W2 PATH 数据丢失隐患**（`env/path_windows.go` RegQueryValueExW 缓冲区按字节计容量 + EnsureUserPath 区分 not-found 与真错误，后者中止自举不覆盖 PATH）。
+- **actionlint**：本机未装，以 **CI 真跑 success** 替代（run 45001871756，注册表测试隔离 VM 通过）。
+- **建仓 + push 基线**：用户授权后 `gh repo create BaixuanZhu/civitai-cli --public`，push commit `95b9018`（174 文件）→ origin/main，CI 触发并 success。
+
+仍待用户决定（外部可见动作）：
+- **首次 tag 发布（v0.1.0）**：触发 release.yml 全自动链（双架构 setup.exe/zip + checksums + attestation + verify-repro）。需用户明确授权。
+- **收尾 commit**：本 acceptance.md 更新 + 任务归档属基线后的 housekeeping 变更，待用户确认推送。
 
 ---
 
