@@ -1,0 +1,28 @@
+{
+  "id": "proxy-support",
+  "name": "proxy-support",
+  "title": "civ proxy support",
+  "description": "Add persistent proxy configuration and proxy-mode selection so civ reaches civitai.com via a proxy when direct connection fails (DNS pollution/timeouts).",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-22",
+  "completedAt": "2026-11-22",
+  "branch": "feat/proxy-support",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "status": "completed"
+  }
+}

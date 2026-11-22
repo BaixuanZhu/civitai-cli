@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Placement of the new internal/proxy leaf, the cmd/proxy.go subcommand pattern (pure run* + execute), the two client factory seams (newAPIClient/newSyncClient), and one-way dependency direction (config/api/cmd/upgrade -> proxy)."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-third-party-dep (stdlib net/http+net/url only), all-English code/comments/CLI output, GoDoc on exported symbols, offline httptest + table-driven tests, reproducible-build trio."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exit-code mapping (proxy set bad URL -> usage-class exit 1), %w wrapping, and non-fatal degradation (invalid persisted proxy warns + falls back to env/direct, mirroring config corrupt-file behavior)."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Mirror config.ResolveToken for ResolveProxy; factor a shared clientOptions(g) so both API client seams apply the proxy without drift; reuse config.Load/Save and a single proxy.NewTransport helper across api+upgrade."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verbose [INFO]/[DEBUG] proxy-in-use line to stderr; stdout-only-results discipline for proxy get/set/unset output; app.Warnf for degrade paths."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines index: conventions overview for the Go CLI"}
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "P1/P2 seams and recipes; new leaf package placement"}
