@@ -199,10 +199,12 @@ func Run(args []string) {
 
 	// Find the asset matching the current platform.
 	assetURL := ""
+	var assetSize int64
 	want := expectedAssetName()
 	for _, a := range rel.Assets {
 		if a.Name == want {
 			assetURL = a.BrowserDownloadURL
+			assetSize = a.Size
 			break
 		}
 	}
@@ -210,9 +212,16 @@ func Run(args []string) {
 		app.Fail(fmt.Errorf("asset %s not found in the latest release.\n   Download it manually from %s.", want, rel.HTMLURL))
 	}
 
-	fmt.Printf("Downloading %s ...\n", want)
+	// On a TTY the label has no trailing newline: the progress meter takes
+	// the line over and Finish terminates it. On non-TTY stdout the label
+	// line stays byte-identical to before (scripts read these lines).
+	if progressGate() {
+		fmt.Printf("Downloading %s ...", want)
+	} else {
+		fmt.Printf("Downloading %s ...\n", want)
+	}
 	tmpZip := filepath.Join(os.TempDir(), "civ-upgrade-"+latestVersion+".zip")
-	if err := downloadFile(assetURL, tmpZip, 3); err != nil {
+	if err := downloadFile(assetURL, tmpZip, 3, assetSize); err != nil {
 		app.Fail(fmt.Errorf("download failed: %w", err))
 	}
 	defer os.Remove(tmpZip)
@@ -290,13 +299,35 @@ func fetchLatestRelease() (*githubRelease, error) {
 }
 
 // downloadFile downloads url to dest, retrying up to retries times on failure (linear backoff).
-func downloadFile(url, dest string, retries int) error {
+// expectedSize is the caller's size hint for the progress line, used only when
+// the server omits Content-Length; the retry loop is unchanged, and each
+// attempt builds a fresh progress meter (prd R5).
+func downloadFile(url, dest string, retries int, expectedSize int64) error {
+	return downloadWithRetry(url, dest, retries, expectedSize, true)
+}
+
+// downloadFileQuiet is downloadFile without the progress meter. The tiny
+// checksums.txt fetch rides it so a TTY never repaints an unlabeled
+// "(0.1 KB, z/s)" line between the zip progress and "Verifying SHA256...";
+// the copy stays byte-quiet exactly like the non-TTY path (prd R1 scopes the
+// progress feature to the upgrade ASSET download only). expectedSize is
+// fixed at 0: with no meter there is no progress total to fall back for.
+func downloadFileQuiet(url, dest string, retries int) error {
+	return downloadWithRetry(url, dest, retries, 0, false)
+}
+
+// downloadWithRetry is the shared retry loop behind downloadFile and
+// downloadFileQuiet. metered selects whether each attempt renders live
+// progress (the asset) or copies silently (the checksum), and each attempt
+// builds a fresh progress meter so counts and rates never bleed across
+// retries (prd R5).
+func downloadWithRetry(url, dest string, retries int, expectedSize int64, metered bool) error {
 	var lastErr error
 	for i := 0; i <= retries; i++ {
 		if i > 0 {
 			time.Sleep(time.Duration(i) * time.Second)
 		}
-		lastErr = downloadOnce(url, dest)
+		lastErr = downloadAttempt(url, dest, expectedSize, metered)
 		if lastErr == nil {
 			return nil
 		}
@@ -304,8 +335,21 @@ func downloadFile(url, dest string, retries int) error {
 	return lastErr
 }
 
-// downloadOnce is a single download attempt: streamed to disk, non-200 counts as failure.
-func downloadOnce(url, dest string) error {
+// downloadOnce is a single metered download attempt — the seam the progress
+// tests exercise directly. Production asset downloads reach the same body
+// through downloadWithRetry with metered=true.
+func downloadOnce(url, dest string, expectedSize int64) error {
+	return downloadAttempt(url, dest, expectedSize, true)
+}
+
+// downloadAttempt is a single download attempt: streamed to disk, non-200 counts as failure.
+// The progress total comes from the response Content-Length, falling back to
+// expectedSize, and finally to an unknown-total render (bytes and speed only).
+// On a TTY the copy routes through the progress meter; on non-TTY stdout
+// newProgressWriter returns the file itself, so the copy is the same silent
+// passthrough as before. metered=false skips the meter entirely, so quiet
+// fetches stay byte-silent on a TTY too.
+func downloadAttempt(url, dest string, expectedSize int64, metered bool) error {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -325,7 +369,22 @@ func downloadOnce(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, resp.Body)
+
+	w := io.Writer(f)
+	if metered {
+		total := resp.ContentLength
+		if total <= 0 {
+			total = expectedSize
+		}
+		meter := newProgressWriter(f, total, os.Stdout, progressGate())
+		if pw, ok := meter.(*progressWriter); ok {
+			// Terminate the progress line even when the copy fails, so a later
+			// stdout line never glues onto a half-drawn one.
+			defer pw.Finish()
+		}
+		w = meter
+	}
+	_, err = io.Copy(w, resp.Body)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -409,6 +468,9 @@ func replaceExeAt(currentExe, newExePath string) error {
 // sha256sum format: "<hash>  <filename>".
 // Returns ("", false) when the checksums.txt asset is missing or the file
 // name does not match.
+// The checksums.txt fetch rides downloadFileQuiet: it is a tiny side
+// download, not the upgrade asset, so it must stay byte-quiet on a TTY
+// instead of repainting the progress line (prd R1).
 func fetchExpectedChecksum(rel *githubRelease, filename string) (string, bool) {
 	var checksumURL string
 	for _, a := range rel.Assets {
@@ -422,7 +484,7 @@ func fetchExpectedChecksum(rel *githubRelease, filename string) (string, bool) {
 	}
 
 	tmpChecksum := filepath.Join(os.TempDir(), "civ-checksums.txt")
-	if err := downloadFile(checksumURL, tmpChecksum, 3); err != nil {
+	if err := downloadFileQuiet(checksumURL, tmpChecksum, 3); err != nil {
 		return "", false
 	}
 	defer os.Remove(tmpChecksum)

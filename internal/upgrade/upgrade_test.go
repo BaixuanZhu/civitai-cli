@@ -230,7 +230,7 @@ func TestDownloadOnce(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "asset.zip")
-	if err := downloadOnce(srv.URL, dest); err != nil {
+	if err := downloadOnce(srv.URL, dest, 0); err != nil {
 		t.Fatalf("downloadOnce failed: %v", err)
 	}
 	got, _ := os.ReadFile(dest)
@@ -249,7 +249,7 @@ func TestDownloadOnce_Non200(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "asset.zip")
-	err := downloadOnce(srv.URL, dest)
+	err := downloadOnce(srv.URL, dest, 0)
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("expected 404 error, got: %v", err)
 	}
