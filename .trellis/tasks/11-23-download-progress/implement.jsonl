@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "P1/P2: progress machinery gets its own file in internal/upgrade; leaves console/report import safely"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stdout progress vs stderr logs discipline; non-TTY silence requirement"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Offline tests with httptest; pure formatter table tests; fake-clock seam instead of real sleeps"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-civitai-cli-go/design.md", "reason": "The original layering/D-contracts this child extends without renegotiating"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse console.IsTerminal and report.FormatSizeKB; no new TTY probe or size formatter"}

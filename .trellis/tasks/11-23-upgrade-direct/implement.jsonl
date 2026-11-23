@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "Layering and seam rules; the upgrade.Run signature change must preserve main-as-router and the leaf import graph"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where upgrade/proxy/config live and the one-way dependency direction for the new Run(args) parsing"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Usage-error vs network-error exit-code mapping for invalid --proxy values"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stderr-only messaging for degrade/usage lines; stdout stays result-only"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-proxy-support/design.md", "reason": "The proxy precedence contract (D1-D8) this child amends for upgrade only; other commands' semantics frozen"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse proxy.Validate/NewTransport instead of inventing flag-side validation"}

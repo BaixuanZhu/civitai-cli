@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "main stays a pure router; cmd exports one small accessor (P2 consumer-side seam)"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "helpPages map belongs in cmd/help.go beside the consts; upgrade stays outside cmd (D4)"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-command-help/design.md", "reason": "The curated-page contract this child routes into; layout/stdout/exit-0 rules must not drift"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Unknown-name path reuses the unknown-command exit-1 contract"}

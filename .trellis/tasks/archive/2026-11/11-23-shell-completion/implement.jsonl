@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "New-subcommand recipe (P3): own file, pure run*, help const, main dispatch entry; no net/http in cmd"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "completion.go/completion_scripts.go placement in internal/cmd; main-only routing"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-command-help/design.md", "reason": "The new command's own help page must follow the curated-page layout and global-block convention"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Unknown-shell usage error maps to exit 1 through the runner"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-dep static scripts; offline drift-guard tests built from real register funcs"}

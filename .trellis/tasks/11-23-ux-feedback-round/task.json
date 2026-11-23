@@ -1,0 +1,33 @@
+{
+  "id": "ux-feedback-round",
+  "name": "ux-feedback-round",
+  "title": "UX feedback fixes: upgrade direct, download progress, help routing, shell completion, skill help trim",
+  "description": "Parent task owning the 5-item user feedback round: (1) civ upgrade stops auto-applying the persisted proxy to GitHub traffic (403 avoidance) with optional --proxy override; (2) download progress with percent and speed for the upgrade zip fetch; (3) civ help <command> routes to per-command help pages; (4) new civ completion <shell> subcommand for bash/zsh/fish/powershell; (5) drop the Notes section from civ skill help.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-23-upgrade-direct",
+    "11-23-download-progress",
+    "11-23-help-routing",
+    "11-23-shell-completion",
+    "11-23-skill-help-trim",
+    "11-23-github-proxy-slot"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

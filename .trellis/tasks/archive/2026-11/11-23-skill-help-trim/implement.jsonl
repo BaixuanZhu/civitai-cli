@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/archive/2026-11/11-22-command-help/design.md", "reason": "The page-layout contract (AC8 section order) this trim must keep green for all ten pages"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Lightweight text change; verify no test still asserts on the Notes content"}
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "Single-source check: no other page embeds Notes drift"}

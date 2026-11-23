@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-dep contract, GoDoc, offline table tests; integration-test.sh must gain the dead-proxy case in the same change"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exit-code contract check: invalid --proxy exits 1 before any network"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "All upgrade messaging stays on stderr except the progress/result lines"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-proxy-support/design.md", "reason": "Verify the amended precedence is documented consistently with the original contract wording"}

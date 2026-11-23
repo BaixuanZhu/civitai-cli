@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/archive/2026-11/11-22-command-help/design.md", "reason": "Cross-all-pages layout audit must still pass after the Notes removal"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Integration help_skill_kw/help_skill_flag keep passing; CHANGELOG Unreleased entry present"}
