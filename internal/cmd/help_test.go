@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -195,4 +197,50 @@ func globalHelpRows() []string {
 		}
 	}
 	return rows
+}
+
+// TestWriteHelpPage_CoversNineCommands is the AC1 contract for the exported
+// accessor: every page indexed by helpPages renders through WriteHelpPage
+// with the "civ <name> -" title line and the shared global block appended,
+// while an unknown name writes nothing and returns false so main can reuse
+// the unknown-command error path. "upgrade" is asserted to miss on purpose
+// — cmd cannot import internal/upgrade (design D4), so main owns that page
+// and the lookup must not swallow it.
+func TestWriteHelpPage_CoversNineCommands(t *testing.T) {
+	for name := range helpPages {
+		var buf bytes.Buffer
+		if !WriteHelpPage(&buf, name) {
+			t.Errorf("%s: WriteHelpPage returned false for an indexed page", name)
+			continue
+		}
+		got := buf.String()
+		if !strings.HasPrefix(got, "civ "+name+" - ") {
+			t.Errorf("%s: rendered page must start with the title line, got:\n%s", name, got)
+		}
+		if !strings.HasSuffix(got, globalHelpBlock) {
+			t.Errorf("%s: page must end with the appended shared global block:\n%s", name, got)
+		}
+	}
+
+	for _, name := range []string{"nope", "", "Search", "upgrade"} {
+		var buf bytes.Buffer
+		if WriteHelpPage(&buf, name) {
+			t.Errorf("%s: WriteHelpPage returned true, want false", name)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("%s: WriteHelpPage wrote %d bytes on a miss, want nothing:\n%s", name, buf.Len(), buf.String())
+		}
+	}
+}
+
+// TestHelpPages_MapMatchesExpectedCommands pins the D1 single-source
+// property: the lookup index must cover exactly the nine cmd-owned pages —
+// no less (a page added without joining the map would be unreachable via
+// `civ help <name>`) and no more (upgrade stays out; main special-cases it).
+func TestHelpPages_MapMatchesExpectedCommands(t *testing.T) {
+	want := []string{"login", "logout", "proxy", "search", "show", "skill", "sync", "tags", "vet"}
+	got := slices.Sorted(maps.Keys(helpPages))
+	if !slices.Equal(got, want) {
+		t.Errorf("helpPages keys = %v, want exactly %v", got, want)
+	}
 }

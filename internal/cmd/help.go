@@ -17,6 +17,40 @@ const globalHelpBlock = `Global flags (accepted after the command name):
   --verbose        Verbose [INFO]/[DEBUG] logging to stderr
 `
 
+// helpPages is the single index from a command name to its curated page
+// body. It backs WriteHelpPage (`civ help <name>`): a new command page must
+// join this map to become reachable, so the index cannot drift from the
+// pages (prd R4). upgrade is deliberately absent — cmd cannot import
+// internal/upgrade (design D4); main.go special-cases that name.
+var helpPages = map[string]string{
+	"search": searchHelp,
+	"show":   showHelp,
+	"vet":    vetHelp,
+	"sync":   syncHelp,
+	"tags":   tagsHelp,
+	"login":  loginHelp,
+	"logout": logoutHelp,
+	"proxy":  proxyHelp,
+	"skill":  skillHelp,
+}
+
+// WriteHelpPage renders the named command's curated help page to w — the
+// "civ <name> -" title line, the command-owned body, then the shared global
+// flags block — and reports whether name is a known command page. It is the
+// `civ help <name>` entry point that main routes into; the `civ <name> help`
+// entry point goes through the runner's isBareHelp interception instead, and
+// both paths must render byte-identical output (prd AC2). On a miss it
+// writes nothing and returns false so main can fall through to the
+// unknown-command error path.
+func WriteHelpPage(w io.Writer, name string) bool {
+	body, ok := helpPages[name]
+	if !ok {
+		return false
+	}
+	writeCommandHelp(w, name, body)
+	return true
+}
+
 // writeCommandHelp prints a command help page to w: the "civ <name> -"
 // title line, the command-owned body, then the shared global flags block.
 // body's first line is the one-line purpose; the rest carries the Usage /
