@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"civitai-cli/internal/app"
 	"civitai-cli/internal/cmd"
@@ -64,13 +65,16 @@ func main() {
 	case "skill":
 		cmd.Skill(os.Args[2:])
 	case "upgrade":
-		// upgrade has no flags, so it bypasses the runner's help handling;
-		// main routes its help tokens directly (task 11-22 design D4).
+		// upgrade parses its own --proxy flag inside Run, so it bypasses the
+		// runner's help handling; main routes its help tokens directly (task
+		// 11-22 design D4).
 		if isUpgradeHelpArg(os.Args[2:]) {
 			fmt.Print(upgrade.Help())
 			return
 		}
-		upgrade.Run()
+		upgrade.Run(os.Args[2:])
+	case "completion":
+		cmd.Completion(os.Args[2:])
 	case "unbootstrap":
 		// Internal maintenance hook invoked by the uninstaller (not listed in
 		// usage): remove this exe's directory from the user PATH.
@@ -81,6 +85,28 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Println("civ", app.Version)
 	case "help", "-h", "--help":
+		// Only the literal "help" keyword takes a target: `civ help <name>`
+		// routes to the curated page (cmd.WriteHelpPage), to upgrade's own
+		// page for the upgrade name (cmd cannot import internal/upgrade,
+		// design D4), or to the unknown-command error. The -h/--help flag
+		// forms always print the overview, matching `civ <cmd> -h`.
+		if os.Args[1] == "help" && len(os.Args) >= 3 {
+			name := os.Args[2]
+			if len(os.Args) == 3 {
+				if cmd.WriteHelpPage(os.Stdout, name) {
+					return
+				}
+				if name == "upgrade" {
+					fmt.Print(upgrade.Help())
+					return
+				}
+			} else {
+				name = strings.Join(os.Args[2:], " ")
+			}
+			fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", name)
+			usage(os.Stderr)
+			os.Exit(1)
+		}
 		usage(os.Stdout)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
@@ -122,11 +148,12 @@ Commands:
   logout           Remove the saved API token
   proxy <action>   Save/show/clear the outbound proxy (set/get/unset; bare = status)
   skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
-  upgrade          Self-update from the latest GitHub Release
+  upgrade          Self-update from the latest GitHub Release ([--proxy <url>])
+  completion <shell>  Print a shell completion script (bash, zsh, fish, powershell)
   version          Print the civ version
   help             Print this help
 
-Run "civ <command> help" (or civ <command> -h) for flags and examples.
+Run "civ <command> help" or "civ help <command>" (or civ <command> -h) for flags and examples.
 
 Global flags (after the command name):
   --json           Machine-readable output (human decoration off)
@@ -143,11 +170,13 @@ Login:
   read the key from stdin, never echoed) when that matters.
 
 Proxy:
-  civ proxy set <url> persists (http/https/socks5/socks5h), get/unset show or
-  clear it, and bare civ proxy prints the status. Precedence: --proxy flag >
-  saved config > HTTP_PROXY/HTTPS_PROXY env; env (and NO_PROXY) apply only
-  when nothing explicit is set. civ upgrade honors the saved proxy and env,
-  but not the --proxy flag.
+  Two independent slots: civ proxy set <url> persists the civitai slot
+  (http/https/socks5/socks5h), which routes the data commands (search, show,
+  vet, sync, tags); civ proxy set --github <url> persists the GitHub slot,
+  which routes only civ upgrade. Data commands resolve --proxy flag >
+  civitai slot > HTTP_PROXY/HTTPS_PROXY env. civ upgrade connects directly
+  by default and resolves --proxy flag > GitHub slot > env; get/unset show or
+  clear a slot, and bare civ proxy prints the status of both.
 
 Environment:
   CIVITAI_API_KEY  API token (below --token, above the saved config)

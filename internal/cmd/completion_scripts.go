@@ -116,7 +116,7 @@ _civ() {
         tags)       COMPREPLY=( $(compgen -W "--limit --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         login)      COMPREPLY=( $(compgen -W "--key -t --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         logout)     COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
-        proxy)      COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        proxy)      COMPREPLY=( $(compgen -W "--github --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         skill)      COMPREPLY=( $(compgen -W "--platform --scope --force --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         upgrade)    COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         completion) COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
@@ -235,7 +235,9 @@ _civ() {
                             'socks5://[SOCKS5 proxy]' \
                             'socks5h://[SOCKS5 proxy, remote DNS]'
                     else
-                        _arguments "${global_specs[@]}"
+                        _arguments \
+                            '--github[target the GitHub-only proxy slot (set/unset)]' \
+                            "${global_specs[@]}"
                     fi
                     ;;
                 skill)
@@ -317,9 +319,10 @@ complete -c civ -n '__fish_seen_subcommand_from tags' -l limit -x -d 'Max tag na
 complete -c civ -n '__fish_seen_subcommand_from login' -l key -x -d 'API key to save ("-" reads stdin)'
 complete -c civ -n '__fish_seen_subcommand_from login' -s t -x -d 'Shorthand for --key'
 
-# civ proxy — actions first, then schemes for "proxy set"
+# civ proxy — actions first, then schemes for "proxy set", then flags
 complete -c civ -n '__fish_seen_subcommand_from proxy' -n 'not __fish_seen_subcommand_from set get unset' -a 'set get unset'
 complete -c civ -n '__fish_seen_subcommand_from proxy' -n '__fish_seen_subcommand_from set' -a 'http:// https:// socks5:// socks5h://'
+complete -c civ -n '__fish_seen_subcommand_from proxy' -l github -d 'Target the GitHub-only proxy slot (set/unset)'
 
 # civ skill — actions first, then flags
 complete -c civ -n '__fish_seen_subcommand_from skill' -n 'not __fish_seen_subcommand_from install remove update' -a 'install remove update'
@@ -382,7 +385,7 @@ Register-ArgumentCompleter -Native -CommandName 'civ' -ScriptBlock {
         'tags'       = @('--limit')
         'login'      = @('--key', '-t')
         'logout'     = @()
-        'proxy'      = @()
+        'proxy'      = @('--github')
         'skill'      = @('--platform', '--scope', '--force')
         'upgrade'    = @()
         'completion' = @()

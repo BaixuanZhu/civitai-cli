@@ -132,9 +132,9 @@ func hasJSONExample(body string) bool {
 // must document json availability (--json reaches the rendered page via
 // the appended global block), and must not duplicate any global-flag row
 // outside that block (prd R4: one shared constant, never copy-pasted).
-// The tenth page, upgrade.Help(), takes the same audit in
+// The eleventh page, upgrade.Help(), takes the same audit in
 // internal/upgrade/upgrade_test.go — cmd cannot import upgrade (design D4
-// keeps the runner unaware of it), so the table stops at the nine
+// keeps the runner unaware of it), so the table stops at the ten
 // runner-routed constants.
 func TestAllHelpPages_SectionOrder(t *testing.T) {
 	pages := []struct {
@@ -151,6 +151,7 @@ func TestAllHelpPages_SectionOrder(t *testing.T) {
 		{"logout", logoutHelp, false},
 		{"proxy", proxyHelp, false},
 		{"skill", skillHelp, true},
+		{"completion", completionHelp, true},
 	}
 	for _, p := range pages {
 		var buf bytes.Buffer
@@ -199,14 +200,14 @@ func globalHelpRows() []string {
 	return rows
 }
 
-// TestWriteHelpPage_CoversNineCommands is the AC1 contract for the exported
+// TestWriteHelpPage_CoversAllCommands is the AC1 contract for the exported
 // accessor: every page indexed by helpPages renders through WriteHelpPage
 // with the "civ <name> -" title line and the shared global block appended,
 // while an unknown name writes nothing and returns false so main can reuse
 // the unknown-command error path. "upgrade" is asserted to miss on purpose
 // — cmd cannot import internal/upgrade (design D4), so main owns that page
 // and the lookup must not swallow it.
-func TestWriteHelpPage_CoversNineCommands(t *testing.T) {
+func TestWriteHelpPage_CoversAllCommands(t *testing.T) {
 	for name := range helpPages {
 		var buf bytes.Buffer
 		if !WriteHelpPage(&buf, name) {
@@ -234,11 +235,11 @@ func TestWriteHelpPage_CoversNineCommands(t *testing.T) {
 }
 
 // TestHelpPages_MapMatchesExpectedCommands pins the D1 single-source
-// property: the lookup index must cover exactly the nine cmd-owned pages —
+// property: the lookup index must cover exactly the ten cmd-owned pages —
 // no less (a page added without joining the map would be unreachable via
 // `civ help <name>`) and no more (upgrade stays out; main special-cases it).
 func TestHelpPages_MapMatchesExpectedCommands(t *testing.T) {
-	want := []string{"login", "logout", "proxy", "search", "show", "skill", "sync", "tags", "vet"}
+	want := []string{"completion", "login", "logout", "proxy", "search", "show", "skill", "sync", "tags", "vet"}
 	got := slices.Sorted(maps.Keys(helpPages))
 	if !slices.Equal(got, want) {
 		t.Errorf("helpPages keys = %v, want exactly %v", got, want)

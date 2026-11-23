@@ -52,8 +52,8 @@ civitai-cli/
 │   │   ├── help.go         #   per-command help pages: globalHelpBlock, writeCommandHelp,
 │   │   │                   #   isBareHelp (stdout + exit 0 for `civ <cmd> help` / -h)
 │   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
-│   ├── config/             # leaf: token + proxy persistence, priority resolution
-│   │   └── config.go       #   Path/Load/Save/Delete/ResolveToken/ResolveProxy
+│   ├── config/             # leaf: token + scoped proxy persistence, priority resolution
+│   │   └── config.go       #   token + scoped proxy slots (proxy, githubProxy); Path/Load/Save/Delete, ResolveToken/ResolveProxy(ResolveGithubProxy)
 │   ├── proxy/              # leaf: outbound proxy validate/resolve/transport
 │   │   └── proxy.go        #   Validate/Resolve/NewTransport (stdlib net/http + net/url only)
 │   ├── hashcache/          # leaf: streaming SHA256 + size/mtime cache
@@ -110,11 +110,12 @@ main.go (dispatch + global-flag assembly + startup maintenance)
   (no `golang.org/x/sys`) to keep the zero-dependency contract. `skill` embeds
   its `assets/civ-prompt` tree via `go:embed` and does pure file operations
   (hand-written frontmatter version extraction, no YAML library).
-- `internal/upgrade` depends on `app`, `config`, and `proxy` — it applies
-  `config.ResolveProxy("")` to its one shared download client via
-  `proxy.NewTransport` (the upgrade→GitHub call is the accepted exception to
-  the `Client.Get` choke point); `main` calls `upgrade.Run()` for the
-  `upgrade` command and `upgrade.CleanupStaleBak()` at startup.
+- `internal/upgrade` depends on `app`, `config`, and `proxy` — `Run` parses
+  its own `--proxy` flag and resolves `--proxy` flag > saved github slot >
+  env for its one shared download client via `proxy.NewTransport` (the
+  upgrade→GitHub call is the accepted exception to the `Client.Get` choke
+  point); `main` calls `upgrade.Run(os.Args[2:])` for the `upgrade` command
+  and `upgrade.CleanupStaleBak()` at startup.
 
 ### Interfaces / seams at the consumer
 

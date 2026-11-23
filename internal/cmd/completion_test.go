@@ -4,21 +4,58 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-// completionCommandWords is the user-facing dispatch list: every command in
-// main's switch minus the internal unbootstrap maintenance hook (design D7).
-var completionCommandWords = []string{
-	"search", "show", "vet", "sync", "tags", "login", "logout", "proxy",
-	"skill", "upgrade", "completion", "version", "help",
+// mainDispatchWords is the user-facing dispatch list, parsed straight out of
+// main.go instead of hand-maintained: every string case label of every
+// switch in main.go, in source order, dropping flag aliases (words starting
+// with "-") and the internal unbootstrap maintenance hook (design D7), with
+// duplicates collapsed (isUpgradeHelpArg's help-token switch repeats the
+// "help" word; first occurrence wins, which preserves dispatch order). It
+// backs the drift guards: a command added to main's switch without a
+// completionSpec entry (and script coverage) fails
+// TestCompletionSpec_CoversDispatch.
+//
+// Accepted limitation: the parser cannot tell a dispatch switch from a
+// helper switch, so a future bare-word case label in main.go that is not a
+// dispatched command breaks the guards loudly — the fix is then to keep
+// helper switches free of bare command words, not to extend this parser.
+func mainDispatchWords(t *testing.T) []string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate this test file")
+	}
+	src, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "main.go"))
+	if err != nil {
+		t.Fatalf("read main.go for the dispatch guard: %v", err)
+	}
+	re := regexp.MustCompile(`(?m)^\s*case\s+((?:"[^"]+"(?:\s*,\s*)?)+)\s*:`)
+	seen := map[string]bool{}
+	var words []string
+	for _, m := range re.FindAllStringSubmatch(string(src), -1) {
+		for _, w := range strings.Split(m[1], ",") {
+			w = strings.Trim(strings.TrimSpace(w), `"`)
+			if w == "" || strings.HasPrefix(w, "-") || w == "unbootstrap" || seen[w] {
+				continue
+			}
+			seen[w] = true
+			words = append(words, w)
+		}
+	}
+	return words
 }
 
 // completionRegisterFuncs maps each command that owns flags today to a
 // builder of its real FlagSet through its real register closure — the
-// drift-guard input (prd R5). Commands absent here (logout, proxy,
-// upgrade, completion, version, help) must carry no flags in the spec.
+// drift-guard input (prd R5). Commands absent here (logout, upgrade,
+// completion, version, help) must carry no flags in the spec.
 var completionRegisterFuncs = map[string]func(*flag.FlagSet){
 	"search": func(fs *flag.FlagSet) { var o searchOptions; o.register(fs) },
 	"show":   func(fs *flag.FlagSet) { var o showOptions; o.register(fs) },
@@ -26,6 +63,7 @@ var completionRegisterFuncs = map[string]func(*flag.FlagSet){
 	"sync":   func(fs *flag.FlagSet) { var o syncOptions; o.register(fs) },
 	"tags":   func(fs *flag.FlagSet) { var o tagsOptions; o.register(fs) },
 	"login":  func(fs *flag.FlagSet) { var o loginOptions; o.register(fs) },
+	"proxy":  func(fs *flag.FlagSet) { var o proxyOptions; o.register(fs) },
 	"skill":  func(fs *flag.FlagSet) { var o skillOptions; o.register(fs) },
 }
 
@@ -70,7 +108,7 @@ func TestCompletionScripts_Anchors(t *testing.T) {
 		if !strings.Contains(s.script, s.anchor) {
 			t.Errorf("%s: script missing anchor %q", s.shell, s.anchor)
 		}
-		for _, word := range completionCommandWords {
+		for _, word := range mainDispatchWords(t) {
 			if !strings.Contains(s.script, word) {
 				t.Errorf("%s: script missing command word %q", s.shell, word)
 			}
@@ -143,16 +181,17 @@ func TestCompletionSpec_CoversRegisteredFlags(t *testing.T) {
 }
 
 // TestCompletionSpec_CoversDispatch pins the spec's command list to main's
-// dispatch list minus unbootstrap (prd R5): same words, same order. A new
-// command added to main without a spec entry (and script coverage) fails
-// here.
+// dispatch list minus unbootstrap (prd R5): same words, same order, parsed
+// from main.go so the guard tracks the real switch. A new command added to
+// main without a spec entry (and script coverage) fails here.
 func TestCompletionSpec_CoversDispatch(t *testing.T) {
 	var got []string
 	for _, c := range completionSpec {
 		got = append(got, c.name)
 	}
-	if strings.Join(got, " ") != strings.Join(completionCommandWords, " ") {
-		t.Errorf("spec commands = [%s], want dispatch list minus unbootstrap = [%s]", strings.Join(got, " "), strings.Join(completionCommandWords, " "))
+	want := mainDispatchWords(t)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("spec commands = [%s], want dispatch list minus unbootstrap = [%s]", strings.Join(got, " "), strings.Join(want, " "))
 	}
 }
 

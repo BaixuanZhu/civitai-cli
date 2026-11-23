@@ -53,7 +53,7 @@ civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.l
 ## Features
 
 - **Core commands** — `search`, `show`, `vet`, `sync`, `tags`, `login`/`logout`,
-  `proxy`, and `skill` — plus `upgrade`, `version`, and `help`.
+  `proxy`, and `skill` — plus `upgrade`, `completion`, `version`, and `help`.
 - **Vetting flagship** — `vet` accepts a file path, a 64-char SHA256, or a
   10-char AutoV2; `sync` batch-audits a directory with a size/mtime hash cache,
   duplicate detection, and CSV/JSON/table output.
@@ -180,11 +180,30 @@ values, and examples — on **stdout**, exit code `0`:
 civ search help       # same page as: civ search -h / civ search --help
 civ vet help
 civ sync help
+civ help search       # the same pages, named the other way around
 ```
 
 The keyword is only intercepted when it is the *single* argument:
-`civ search help me` still searches the query "help me". `civ help` prints
-the command overview with a pointer to these pages.
+`civ search help me` still searches the query "help me". `civ help <command>`
+reaches the same curated pages (`civ help upgrade` routes to upgrade's page),
+and an unknown name exits `1`. `civ help` prints the command overview with a
+pointer to these pages.
+
+### Shell completion
+
+Static completion scripts for bash, zsh, fish, and PowerShell ship inside
+the binary — no `civ` subprocess runs at completion time:
+
+```bash
+source <(civ completion bash)                              # bash, this session
+civ completion zsh > "${fpath[1]}/_civ"                    # zsh: any directory in $fpath
+civ completion fish | source                               # fish, this session
+civ completion powershell | Out-String | Invoke-Expression # PowerShell, this session
+```
+
+For a persistent install, drop the script in your shell's completion
+directory (the script headers point at it) — for PowerShell, add the
+`Invoke-Expression` line to `$PROFILE` instead.
 
 ### `civ search <query>` — find models
 
@@ -322,20 +341,28 @@ your shell history and visible in the process list; prefer
 
 ```bash
 civ proxy set http://127.0.0.1:7890    # validate + persist next to the token
+civ proxy set --github http://127.0.0.1:7891  # persist the GitHub-only slot (civ upgrade)
 civ proxy get                          # persisted + effective proxy and its source
 civ proxy                              # bare form: same status view as get
-civ proxy get --json                   # {"persisted":...,"effective":...,"source":...}
+civ proxy get --json                   # both scopes, {"persisted","effective","source"} each
 civ proxy unset                        # clear the saved proxy (token preserved)
+civ proxy unset --github               # clear only the GitHub slot
 civ search anima --proxy socks5://127.0.0.1:1080   # ad-hoc, this invocation only
 ```
 
 Route civ's outbound HTTP through an HTTP, HTTPS, SOCKS5, or SOCKS5h proxy —
 for networks where a direct connection to civitai.com times out or fails DNS.
+There are two persisted slots that never cross: the **civitai slot**
+(`civ proxy set`), routing the data commands (`search`, `show`, `vet`,
+`sync`, `tags`), and the **GitHub slot** (`civ proxy set --github`), routing
+only `civ upgrade`. `civ upgrade` connects directly by default and resolves
+`--proxy` flag > GitHub slot > `HTTP(S)_PROXY` env, so a shared-proxy 403 on
+GitHub no longer blocks self-updates.
 `set` validates before anything is saved — the scheme must be `http`,
 `https`, `socks5`, or `socks5h` with a non-empty `host:port`; malformed input
-exits `1` and saves nothing. `unset` rewrites only the proxy field of the
-loaded config (idempotent), so the saved token survives. The proxy lives in
-the same `%APPDATA%\civ\config.json` as the token.
+exits `1` and saves nothing. `unset` rewrites only the targeted slot(s) of
+the loaded config (idempotent), so the saved token survives. The slots live
+in the same `%APPDATA%\civ\config.json` as the token.
 
 **Proxy priority (highest first):**
 
@@ -369,9 +396,10 @@ it never fails a command.
 > exactly these two hosts, so this is a deliberate tradeoff; `NO_PROXY` still
 > applies in the environment-only fallback.
 
-> **Upgrade note:** `civ upgrade` honors the saved config proxy and the
-> environment, but does not parse the `--proxy` flag. Run `civ proxy set`
-> once to upgrade through a proxy.
+> **Upgrade note:** `civ upgrade` ignores the civitai slot (GitHub
+> rate-limits shared proxy IPs with 403) and connects directly by default.
+> To relay the upgrade through a proxy, pass `civ upgrade --proxy <url>` or
+> persist the GitHub slot once with `civ proxy set --github <url>`.
 
 ### `civ upgrade` — self-update
 

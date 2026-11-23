@@ -9,6 +9,32 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [Unreleased]
+
+### Added
+
+- GitHub-only proxy slot: `civ proxy set --github <url>` persists a proxy
+  that routes only `civ upgrade` traffic, independently of the civitai slot
+  used by the data commands; `civ proxy unset --github` clears just that
+  slot, and the status report (text and `--json`) shows both scopes.
+- TTY download progress for `civ upgrade`: the release zip fetch shows live
+  percent, sizes, and speed on an interactive terminal and stays quiet in
+  scripts.
+- `civ help <command>` routes to the same curated page as
+  `civ <command> help` (and `civ help upgrade` to upgrade's page); unknown
+  targets exit 1 with the unknown-command error.
+- New `civ completion` subcommand printing a static completion script for
+  bash, zsh, fish, or PowerShell (`civ completion <shell>`); bare
+  `civ completion` prints the command's help page.
+
+### Changed
+
+- `civ upgrade` no longer honors the civitai proxy slot (GitHub
+  rate-limits shared proxy IPs with 403): it connects directly by default
+  and resolves `--proxy` flag > saved GitHub slot > `HTTP(S)_PROXY` env.
+- `civ skill help` Notes section removed (its content is covered by the
+  Options/Examples sections).
+
 ## [0.3.0] - 2026-11-23
 
 ### Added

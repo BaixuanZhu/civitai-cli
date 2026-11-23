@@ -119,7 +119,9 @@ var completionSpec = []completionCommandSpec{
 		{"t", nil},
 	}},
 	{"logout", nil},
-	{"proxy", nil},
+	{"proxy", []completionFlagSpec{
+		{"github", nil},
+	}},
 	{"skill", []completionFlagSpec{
 		{"platform", []string{"claude", "zcode", "codex", "all"}},
 		{"scope", []string{"user", "project"}},

@@ -36,6 +36,7 @@ Options:
 Examples:
   civ skill install
   civ skill install --platform zcode --scope project
+  civ skill install --platform zcode --json
   civ skill install --platform all --force
   civ skill update --platform claude,zcode
 `

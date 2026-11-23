@@ -128,10 +128,28 @@ run search_timeout_bad  search anima --limit 1 --timeout 1ns
 # case below is search_help_me (the keyword is literal: "help me" is a real
 # query). upgrade's help tokens are routed by main (design D4) and asserted
 # here — distinct from the real self-update run that stays LAST.
-for c in search show vet sync tags login logout proxy skill upgrade; do
+for c in search show vet sync tags login logout proxy skill upgrade completion; do
   run "help_${c}_kw"   "$c" help
   run "help_${c}_flag" "$c" -h
 done
+# Named help routing (task 11-23-help-routing): `civ help <name>` reaches the
+# same curated page as `civ <name> help` (byte-compare asserted below),
+# `civ help upgrade` reaches upgrade's own main-routed page, and unknown or
+# extra-word targets are usage errors (exit 1). All offline: no page renders
+# touch the network.
+run help_search_named  help search
+run help_upgrade_named help upgrade
+run help_unknown       help nope
+run help_extra         help search extra
+# Shell completion (task 11-23-shell-completion): each supported shell prints
+# its static script (exit 0), an unknown shell is a usage error (exit 1), and
+# bare `civ completion` prints the command's help page (exit 0). All offline.
+run completion_bash completion bash
+run completion_zsh  completion zsh
+run completion_fish completion fish
+run completion_pwsh completion powershell
+run completion_bad  completion tcsh
+run completion_bare completion
 # login help with empty stdin: interception happens before the prompt, so a
 # regression to the interactive prompt would read the empty line and fail
 # the exit-0 assertion loudly instead of hanging (login_* convention).
@@ -180,6 +198,13 @@ snap_cfg proxy_after_unset
 run proxy_unset_again  proxy unset
 run proxy_usage        proxy set
 run search_proxy_bad   search anima --limit 1 --proxy http://127.0.0.1:9
+# GitHub slot (task 11-23-github-proxy-slot): set/get/unset --github touch
+# only the githubProxy key; the civitai slot survives the scoped unset.
+run proxy_set_gh    proxy set --github http://127.0.0.1:7891
+snap_cfg proxy_after_setgh
+run proxy_get_gh    proxy get
+run proxy_unset_gh  proxy unset --github
+snap_cfg proxy_after_unsetgh
 rm -f "$CFG"
 
 # --- skill subcommand (isolated home; pure local file ops) ---
@@ -204,6 +229,10 @@ printf '%s' "$got" > "$WORK/skill_interactive.exit"
 echo "[integration] ran skill_interactive (exit $got)"
 
 # --- self-update: graceful handling, run LAST (may replace the test exe) ---
+# --proxy to a refused port must fail fast (exit 1) before the release check
+# — no network wait (task 11-23-upgrade-direct). The real upgrade run stays
+# LAST.
+run upgrade_proxy_dead upgrade --proxy http://127.0.0.1:1
 run upgrade          upgrade
 
 echo "[integration] asserting responses..."
@@ -333,8 +362,9 @@ check(exit_of('usage_error') == 1,
 
 # help / unknown command: usage surface (offline)
 check(exit_of('help_cmd') == 0 and 'Usage:' in out_of('help_cmd')
-      and 'proxy' in out_of('help_cmd'),
-      'civ help: exit 0, usage printed, proxy listed')
+      and 'proxy' in out_of('help_cmd')
+      and 'completion' in out_of('help_cmd'),
+      'civ help: exit 0, usage printed, proxy and completion listed')
 check('civ <command> help' in out_of('help_cmd'),
       'civ help: contains the "Run civ <command> help" pointer (AC6)')
 check(exit_of('unknown_cmd') == 1
@@ -356,6 +386,7 @@ help_sigs = {
     'proxy': [['socks5']],
     'skill': [['--platform']],
     'upgrade': [['upgrade']],
+    'completion': [['bash']],
 }
 for cmd, groups in help_sigs.items():
     for form, token in (('kw', 'help'), ('flag', '-h')):
@@ -392,6 +423,41 @@ s = out_of('help_search_kw')
 check(0 <= s.find('Usage:') < s.find('Options:') < s.find('Examples:')
       < s.find('Global flags'),
       'civ search help: sections ordered Usage < Options < Examples < Global flags')
+
+# named help routing (task 11-23-help-routing): `civ help <name>` byte-equals
+# `civ <name> help` for cmd-owned pages and for upgrade's main-routed page;
+# unknown and extra-word targets exit 1 naming the target.
+check(exit_of('help_search_named') == 0
+      and out_of('help_search_named') == out_of('help_search_kw'),
+      'civ help search: exit 0, byte-identical to `civ search help`')
+check(exit_of('help_upgrade_named') == 0
+      and out_of('help_upgrade_named') == out_of('help_upgrade_kw'),
+      'civ help upgrade: exit 0, byte-identical to `civ upgrade help`')
+check(exit_of('help_unknown') == 1
+      and 'unknown command' in err_of('help_unknown'),
+      'civ help nope: exit 1 (unknown command)')
+check(exit_of('help_extra') == 1
+      and 'unknown command' in err_of('help_extra'),
+      'civ help search extra: exit 1 (unknown command naming the full remainder)')
+
+# shell completion (task 11-23-shell-completion): each supported shell prints
+# its static script, tcsh is a usage error naming the valid shells, and the
+# bare form prints the command's help page. The bash script anchors on
+# complete -F and never completes the internal unbootstrap hook.
+check(exit_of('completion_bash') == 0
+      and 'complete -F _civ civ' in out_of('completion_bash')
+      and 'unbootstrap' not in out_of('completion_bash'),
+      'civ completion bash: exit 0, anchored script, no unbootstrap')
+for label, shell in [('completion_zsh', 'zsh'), ('completion_fish', 'fish'),
+                     ('completion_pwsh', 'powershell')]:
+    check(exit_of(label) == 0 and out_of(label).strip() != '',
+          'civ completion %s: exit 0, script printed' % shell)
+check(exit_of('completion_bad') == 1
+      and 'valid shells' in err_of('completion_bad'),
+      'civ completion tcsh: exit 1 naming the valid shells')
+check(exit_of('completion_bare') == 0
+      and 'Usage:' in out_of('completion_bare'),
+      'civ completion (bare): exit 0, help page printed')
 
 # --timeout flag plumbing: 1ns deadline always exceeded -> exit 2
 check(exit_of('search_timeout_bad') == 2,
@@ -480,6 +546,24 @@ check(exit_of('proxy_usage') == 1,
 check(exit_of('search_proxy_bad') == 2,
       'search --proxy <dead port>: exit 2 (request routed through the flag proxy)')
 
+# GitHub proxy slot (task 11-23-github-proxy-slot): set --github persists the
+# githubProxy key alongside the civitai slot; get shows both scopes; the
+# scoped unset clears only githubProxy and keeps the civitai slot.
+snap = cfg_snap('proxy_after_setgh')
+check(exit_of('proxy_set_gh') == 0 and snap is not None
+      and snap.get('proxy') == 'http://127.0.0.1:7890'
+      and snap.get('githubProxy') == 'http://127.0.0.1:7891',
+      'proxy set --github: exit 0, both slots persisted (proxy + githubProxy)')
+check(exit_of('proxy_get_gh') == 0
+      and 'http://127.0.0.1:7890' in out_of('proxy_get_gh')
+      and 'GitHub persisted: http://127.0.0.1:7891' in out_of('proxy_get_gh'),
+      'proxy get: text report shows both scopes (incl. the github block)')
+snap = cfg_snap('proxy_after_unsetgh')
+check(exit_of('proxy_unset_gh') == 0 and snap is not None
+      and snap.get('githubProxy', '') == ''
+      and snap.get('proxy') == 'http://127.0.0.1:7890',
+      'proxy unset --github: exit 0, github slot cleared, civitai slot kept')
+
 # skill install: three platforms, JSON results, correct native roots
 si = json_of('skill_install')
 si = si if isinstance(si, list) else []
@@ -534,6 +618,12 @@ check(exit_of('skill_interactive') == 0
       and 'installed' in out_of('skill_interactive')
       and os.path.isfile(claude_re),
       'skill install (piped stdin): preselected claude installed')
+
+# upgrade --proxy to a refused port fails fast (exit 1) before the release
+# check — the transport error surfaces immediately, no network wait (task
+# 11-23-upgrade-direct).
+check(exit_of('upgrade_proxy_dead') == 1,
+      'upgrade --proxy <dead port>: exit 1 (fast failure, no network wait)')
 
 # upgrade: graceful (no release -> exit 1; after release -> exit 0), no panic
 check(exit_of('upgrade') in (0, 1) and (out_of('upgrade') or err_of('upgrade')),

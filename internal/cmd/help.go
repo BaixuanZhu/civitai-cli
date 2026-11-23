@@ -23,15 +23,16 @@ const globalHelpBlock = `Global flags (accepted after the command name):
 // pages (prd R4). upgrade is deliberately absent — cmd cannot import
 // internal/upgrade (design D4); main.go special-cases that name.
 var helpPages = map[string]string{
-	"search": searchHelp,
-	"show":   showHelp,
-	"vet":    vetHelp,
-	"sync":   syncHelp,
-	"tags":   tagsHelp,
-	"login":  loginHelp,
-	"logout": logoutHelp,
-	"proxy":  proxyHelp,
-	"skill":  skillHelp,
+	"search":     searchHelp,
+	"show":       showHelp,
+	"vet":        vetHelp,
+	"sync":       syncHelp,
+	"tags":       tagsHelp,
+	"login":      loginHelp,
+	"logout":     logoutHelp,
+	"proxy":      proxyHelp,
+	"skill":      skillHelp,
+	"completion": completionHelp,
 }
 
 // WriteHelpPage renders the named command's curated help page to w — the
