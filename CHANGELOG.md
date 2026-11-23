@@ -24,6 +24,23 @@ awk extraction — do not change it casually.
   touching stdin. `civ help` now points at the per-command pages, and
   unknown-flag errors no longer print the noisy default usage dump.
 
+### Changed
+
+- `civ skill install` without `--platform` now asks through arrow-key menus
+  on a terminal: a platform multi-select (up/down move, Space toggles, `a`
+  toggles all, Enter accepts; detected platforms pre-toggled), a scope
+  single-select, and an overwrite/skip/backup single-select for conflicts
+  (default `skip`). `q`, `Esc`, or `Ctrl+C` cancels with the existing
+  `skill: canceled by user` error (exit 1); canceling the conflict menu
+  resolves to the safe `skip`. The final `Proceed? [y/N]` confirmation is
+  removed everywhere: the resolved target paths print once as a record and
+  the action runs immediately. Non-terminal stdin (pipes, CI) keeps the
+  text prompt flow, minus the confirmation. The menus live in a new
+  `internal/console` leaf package built on hand-written kernel32 syscalls
+  (GetStdHandle/GetConsoleMode/SetConsoleMode), preserving the
+  stdlib-only dependency contract; non-Windows and VT-less terminals fall
+  back to the text prompts automatically.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

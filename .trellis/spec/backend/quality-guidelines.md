@@ -23,6 +23,8 @@ publishing.
 | `net/http` calls outside `internal/api` `Client.Get` | `Get` is the single outbound choke point (UA, auth, retry, concurrency gate, body limit, error shrink apply uniformly). |
 | cobra / other CLI frameworks | Hand-written `switch os.Args[1]` dispatch + per-command `flag.NewFlagSet`; six commands do not justify a framework. |
 | Chinese (or any non-English) in comments, GoDoc, CLI output, logs, test names, script echo | zh-CN Windows console mojibake broke `make` before; everything is English. |
+| Non-ASCII UI glyphs in console output, except the `[✓]` toggle marker | Classic conhost under zh-CN code pages renders non-ASCII as mojibake; structural/alignment-critical glyphs stay ASCII (`>` cursor — `internal/console/render.go`). `[✓]` (U+2713) is the sole user-approved exception (2026-11-23): neutral width, so it cannot break column alignment the way ambiguous-width glyphs (`●`, `❯`) do on CJK terminals. |
+| Wrapping a caller's fd in `os.NewFile` to stat/poll it | The GC finalizer closes the descriptor on collection, silently killing the caller's stdin; probe with `syscall.Fstat` / `GetConsoleMode` instead (`internal/console/mode_other.go`). |
 | External network in unit tests | Unit tests use `httptest` + `testdata/` fixtures only; CI's unit-test path never touches the network. |
 | Test-only exported API | Tests shorten retry backoffs by editing private fields in-package (`cli.backoffs`) or replace `cmd` factory seams; no production export exists just for tests. |
 | `Compress-Archive` for release zips | Local-time timestamps break reproducibility; use `scripts/zipfile` (pins entry headers to `SOURCE_DATE_EPOCH`). |
@@ -75,7 +77,11 @@ publishing.
     unknown enums).
   - `cmd`: drive pure `run*` functions against `httptest` via the
     `newAPIClient`/`newSyncClient`/`computeHash` seams; assert rendering and exit
-    codes (`TestExitCodeFor`, `TestVetExitCode`, `TestLogin_*`).
+    codes (`TestExitCodeFor`, `TestVetExitCode`, `TestLogin_*`). Interactive
+    flows: the text fallback is driven by an injected `strings.Reader`; menu
+    mode is covered through the `skillMenu*` seam fakes (no TTY in tests), and
+    the `*os.File` type-assert gate keeps injected readers off the real-console
+    path even when `go test` runs in a terminal.
   - `hashcache`: temp-dir invalidation (size/mtime drift), atomic save, nil
     disabled cache.
   - `upgrade`: pure functions (`compareVersions`, `parseChecksum`,

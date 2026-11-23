@@ -388,7 +388,7 @@ Leftover `.bak` files are cleaned on every startup.
 ### `civ skill <action>` — install the civ-prompt Agent Skill
 
 ```bash
-civ skill install                          # interactive: pick platforms + scope, confirm
+civ skill install                          # interactive: pick platforms + scope (menus on a terminal)
 civ skill install --platform claude,zcode,codex --scope user
 civ skill install --platform all --force   # non-interactive, overwrite an existing copy
 civ skill update --platform claude         # rewrite only when the version differs
@@ -428,15 +428,21 @@ symlinks, so Windows needs no elevated privileges):
 > stderr warning notes this.
 
 **Interactive mode** (no `--platform`): civ detects installed platforms
-(`~/.claude`, `~/.zcode`, `~/.codex`/`~/.agents`, or binaries on PATH), preselects
-them, and prompts on stderr for a numbered multi-select, a scope (default `user`),
-and a confirmation showing the target paths. Canceling exits `1`. When the target
-already exists, install prompts `overwrite` / `skip` / `backup` (default `skip`;
-`backup` renames the old directory to `civ-prompt.bak`). `--force` overwrites
-without prompting. The `civ-prompt.bak` backup is kept for safety; its `name` no
-longer matches the directory name, so platform skill scanners ignore it (it is not
-loaded as a duplicate). `remove` deletes only the active `civ-prompt/` — delete any
-leftover `.bak` manually if you want it gone.
+(`~/.claude`, `~/.zcode`, `~/.codex`/`~/.agents`, or binaries on PATH) and
+preselects them. On a terminal the choices are arrow-key menus: a platform
+multi-select (up/down move, Space toggles, `a` toggles all, Enter accepts),
+a scope single-select (default `user`), and — when the target already
+exists — an `overwrite` / `skip` / `backup` single-select (default `skip`;
+`backup` renames the old directory to `civ-prompt.bak`). `q`, `Esc`, or
+`Ctrl+C` cancels with exit `1`; canceling the conflict menu picks the safe
+`skip`. After the choices, the resolved target paths print once and the
+action runs immediately — there is no confirmation step. When stdin is not a
+terminal (pipes, CI), civ falls back to plain text prompts on stderr with
+the same defaults, minus the confirmation. `--force` overwrites without
+prompting. The `civ-prompt.bak` backup is kept for safety; its `name` no
+longer matches the directory name, so platform skill scanners ignore it (it
+is not loaded as a duplicate). `remove` deletes only the active
+`civ-prompt/` — delete any leftover `.bak` manually if you want it gone.
 
 **Actions reported:** `installed`, `updated`, `up-to-date`, `skipped`, `removed`,
 `backed-up`, `not-found`. `update` compares the installed `metadata.version`

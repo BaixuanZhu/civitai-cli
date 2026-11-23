@@ -189,18 +189,32 @@ run skill_install    skill install --platform claude,zcode,codex --scope user --
 run skill_update     skill update --platform claude --scope user --json
 run skill_remove     skill remove --platform zcode --scope user --json
 run skill_bad        skill install --platform bogus
+# Interactive fallback (task 11-22-skill-interactive-menu): piped stdin is
+# not a terminal, so the text prompt flow runs — now without the removed
+# Proceed confirmation. A separate isolated home with only .claude planted
+# makes detection preselect exactly claude (the cases above left .zcode/
+# .agents dirs in $ISO_HOME, which detection would otherwise pick up);
+# the empty platform line accepts that preselection, "user" picks the scope.
+INT_HOME="$ISO/home-interactive"
+mkdir -p "$INT_HOME/.claude"
+got=0
+printf '\nuser\n' | HOME="$INT_HOME" USERPROFILE="$(cygpath -w "$PWD/$INT_HOME")" \
+  "$EXE" skill install >"$WORK/skill_interactive.out" 2>"$WORK/skill_interactive.err" || got=$?
+printf '%s' "$got" > "$WORK/skill_interactive.exit"
+echo "[integration] ran skill_interactive (exit $got)"
 
 # --- self-update: graceful handling, run LAST (may replace the test exe) ---
 run upgrade          upgrade
 
 echo "[integration] asserting responses..."
-python - "$WORK" "$ISO_HOME" <<'PYEOF'
+python - "$WORK" "$ISO_HOME" "$INT_HOME" <<'PYEOF'
 import json
 import os
 import sys
 
 WORK = sys.argv[1]
 ISO_HOME = sys.argv[2]
+INT_HOME = sys.argv[3]
 failures = []
 
 
@@ -506,6 +520,20 @@ check(exit_of('skill_remove') == 0 and len(sr) == 1
 # skill invalid platform -> exit 1
 check(exit_of('skill_bad') == 1,
       'skill install --platform bogus: exit 1 (usage)')
+
+# skill interactive fallback (task 11-22-skill-interactive-menu): piped
+# stdin drives the text prompts with one fewer step — no Proceed
+# confirmation — and the planted .claude marker preselects claude, whose
+# empty answer accepts it.
+claude_re = os.path.join(INT_HOME, '.claude', 'skills', 'civ-prompt', 'SKILL.md')
+check(exit_of('skill_interactive') == 0
+      and 'Select platforms' in err_of('skill_interactive')
+      and 'Proceed?' not in err_of('skill_interactive'),
+      'skill install (piped stdin): exit 0 via text fallback, no Proceed? confirmation')
+check(exit_of('skill_interactive') == 0
+      and 'installed' in out_of('skill_interactive')
+      and os.path.isfile(claude_re),
+      'skill install (piped stdin): preselected claude installed')
 
 # upgrade: graceful (no release -> exit 1; after release -> exit 0), no panic
 check(exit_of('upgrade') in (0, 1) and (out_of('upgrade') or err_of('upgrade')),

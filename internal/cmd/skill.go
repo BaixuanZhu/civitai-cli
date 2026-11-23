@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"civitai-cli/internal/app"
+	"civitai-cli/internal/console"
 	"civitai-cli/internal/report"
 	"civitai-cli/internal/skill"
 )
@@ -39,23 +40,28 @@ Examples:
   civ skill update --platform claude,zcode
 
 Notes:
-  Without --platform the command prompts on stderr and reads the choices
-  from stdin, with detected platforms preselected (Enter accepts them);
-  canceling the confirmation exits 1. Each platform gets its native skill
-  root: .claude/skills, .zcode/skills, or the shared .agents/skills for
-  codex. update rewrites only installed skills whose version differs from
-  the running one (use install for a fresh target). --json prints an array
-  of {platform, path, action} results. Local file operations only, no
-  network.
+  Without --platform the command asks interactively: on a terminal it
+  shows arrow-key menus (up/down move, space toggles, a toggles all,
+  Enter accepts; q or Esc cancels with exit 1), otherwise it prompts on
+  stderr and reads stdin. Detected platforms come preselected in both
+  UIs, the resolved target paths print once, and the action runs
+  immediately (no confirmation step). Each platform gets its native
+  skill root: .claude/skills, .zcode/skills, or the shared .agents/skills
+  for codex. update rewrites only installed skills whose version differs
+  from the running one (use install for a fresh target). --json prints
+  an array of {platform, path, action} results. Local file operations
+  only, no network.
 `
 
 // Skill runs the skill command: civ skill <install|remove|update> [flags]. It
 // installs, removes, or updates the bundled civ-prompt Agent Skill across the
 // claude / zcode / codex platforms. With --platform it runs non-interactively;
-// without it, it prompts on stderr (detected platforms preselected) and reads
-// choices from stdin. Output is a human summary or --json []Result. This is a
-// purely local file operation (no network). Exit codes: 0 success, 1 usage error
-// (unknown action, invalid platform/scope, or interactive cancel).
+// without it, it asks interactively — arrow-key menus on a terminal (detected
+// platforms pre-toggled), text prompts on stderr otherwise — and runs the
+// action once the choices are made (no confirmation step). Output is a human
+// summary or --json []Result. This is a purely local file operation (no
+// network). Exit codes: 0 success, 1 usage error (unknown action, invalid
+// platform/scope, or interactive cancel).
 func Skill(args []string) {
 	var o skillOptions
 	execute("skill", skillHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
@@ -79,6 +85,20 @@ func (o *skillOptions) register(fs *flag.FlagSet) {
 
 // skillPlatformMenu is the fixed display order for interactive selection.
 var skillPlatformMenu = []skill.Platform{skill.PlatformClaude, skill.PlatformZcode, skill.PlatformCodex}
+
+// Interactive-menu seams (function values, the newAPIClient pattern): the
+// console-backed menu operations and the console gate are package vars so
+// tests can drive the arrow-key path with fakes instead of a terminal.
+var (
+	skillMenuSelectMulti = console.SelectMulti
+	skillMenuSelectOne   = console.SelectOne
+	skillStdinIsConsole  = defaultSkillStdinIsConsole
+)
+
+// errSkillMenuCanceled marks an explicit arrow-key menu cancel (q, Esc, or
+// Ctrl+C); skillChooseInteractive maps it to the shared "skill: canceled by
+// user" error so the exit code matches the text flow (prd R3).
+var errSkillMenuCanceled = errors.New("menu canceled")
 
 // runSkill is the pure skill implementation with an injectable stdin so tests
 // can drive the interactive flow with a strings.Reader (no terminal). It
@@ -105,16 +125,10 @@ func runSkill(ctx context.Context, g *globals, pos []string, o *skillOptions, st
 	var platforms []skill.Platform
 	var conflict skill.ConflictFunc
 	if strings.TrimSpace(o.platform) == "" {
-		// Interactive: one scanner drives platform, scope, confirmation, and
-		// any per-conflict prompts so reads stay sequential on the same stdin.
-		p := &skillPrompter{sc: bufio.NewScanner(stdin), out: os.Stderr}
 		var err error
-		platforms, scope, err = p.selectPlatformsAndScope(action, scope)
+		platforms, scope, conflict, err = skillChooseInteractive(action, scope, stdin)
 		if err != nil {
 			return err
-		}
-		if action == "install" {
-			conflict = p.conflictFunc()
 		}
 	} else {
 		var err error
@@ -151,6 +165,142 @@ func runSkill(ctx context.Context, g *globals, pos []string, o *skillOptions, st
 		return err
 	}
 	return renderSkillResults(g, action, results)
+}
+
+// skillChooseInteractive resolves platforms, scope, and the install conflict
+// callback interactively. On a real console it drives arrow-key menus; every
+// other stdin — and a console that fails raw-mode setup or errors mid-menu —
+// runs the text prompt flow on the same stdin instead (prd R4: the fallback
+// is the safety net for pipes, CI, injected readers, and exotic terminals).
+// A menu cancel returns the existing "skill: canceled by user" error (prd R3).
+func skillChooseInteractive(action string, defaultScope skill.Scope, stdin io.Reader) ([]skill.Platform, skill.Scope, skill.ConflictFunc, error) {
+	if skillStdinIsConsole(stdin) {
+		platforms, scope, conflict, err := skillMenuSelect(action, defaultScope)
+		switch {
+		case err == nil:
+			return platforms, scope, conflict, nil
+		case errors.Is(err, errSkillMenuCanceled):
+			return nil, "", nil, errors.New("skill: canceled by user")
+		}
+		// Any other console error falls through to the text prompts below.
+	}
+	p := &skillPrompter{sc: bufio.NewScanner(stdin), out: os.Stderr}
+	platforms, scope, err := p.selectPlatformsAndScope(action, defaultScope)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	var conflict skill.ConflictFunc
+	if action == "install" {
+		conflict = p.conflictFunc()
+	}
+	return platforms, scope, conflict, nil
+}
+
+// defaultSkillStdinIsConsole reports whether the interactive stdin is the
+// process's real console. Menus need raw mode on the actual handle, so only
+// an *os.File that passes console.IsTerminal qualifies; pipes, redirected
+// files, and test-injected readers take the text prompt path.
+func defaultSkillStdinIsConsole(stdin io.Reader) bool {
+	f, ok := stdin.(*os.File)
+	return ok && console.IsTerminal(f.Fd())
+}
+
+// skillMenuSelect drives the arrow-key menus for the interactive flow: the
+// platform multi-select (detected platforms pre-toggled, cursor on the
+// first), the scope single-select (default highlighted), then a one-time
+// record of the resolved target paths (prd R2: the choices themselves are
+// the confirmation — there is no extra Proceed step). Install conflicts
+// resolve through a menu-backed ConflictFunc whose cancel maps to skip.
+func skillMenuSelect(action string, defaultScope skill.Scope) ([]skill.Platform, skill.Scope, skill.ConflictFunc, error) {
+	detected := skill.DetectPlatforms()
+	detectedSet := make(map[skill.Platform]bool)
+	for _, d := range detected {
+		detectedSet[d] = true
+	}
+	rows := make([]string, len(skillPlatformMenu))
+	preselect := make([]int, 0, len(detected))
+	for i, pl := range skillPlatformMenu {
+		root, err := skill.RootFor(pl, defaultScope)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		rows[i] = fmt.Sprintf("%-7s %s", pl, root)
+		if detectedSet[pl] {
+			rows[i] += "  [detected]"
+			preselect = append(preselect, i)
+		}
+	}
+	sel, err := skillMenuSelectMulti(fmt.Sprintf("Select platforms for civ skill %s:", action), rows, preselect)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if sel.Canceled {
+		return nil, "", nil, errSkillMenuCanceled
+	}
+	platforms := make([]skill.Platform, 0, len(sel.Indexes))
+	for _, i := range sel.Indexes {
+		platforms = append(platforms, skillPlatformMenu[i])
+	}
+
+	defaultIdx := 0
+	if defaultScope == skill.ScopeProject {
+		defaultIdx = 1
+	}
+	scopeSel, err := skillMenuSelectOne(fmt.Sprintf("Scope (default %s):", defaultScope),
+		[]string{"user (home directory)", "project (current directory)"}, defaultIdx)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if scopeSel.Canceled {
+		return nil, "", nil, errSkillMenuCanceled
+	}
+	scope := skill.ScopeUser
+	if len(scopeSel.Indexes) > 0 && scopeSel.Indexes[0] == 1 {
+		scope = skill.ScopeProject
+	}
+
+	fmt.Fprintln(os.Stderr, "Target paths:")
+	for _, pl := range platforms {
+		root, err := skill.RootFor(pl, scope)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		fmt.Fprintf(os.Stderr, "  %s: %s\n", pl, filepath.Join(root, skill.SkillName))
+	}
+
+	var conflict skill.ConflictFunc
+	if action == "install" {
+		conflict = skillMenuConflictFunc()
+	}
+	return platforms, scope, conflict, nil
+}
+
+// skillMenuConflictFunc returns the menu-backed install conflict decision: a
+// single-select overwrite/skip/backup menu with the cursor on the safe
+// default skip (mirroring the text prompt). Cancel and any menu error
+// resolve to skip — a broken menu must not abort the install (prd R3).
+func skillMenuConflictFunc() skill.ConflictFunc {
+	return func(path, installed string) string {
+		v := installed
+		if v == "" {
+			v = "unknown"
+		}
+		sel, err := skillMenuSelectOne(
+			fmt.Sprintf("civ-prompt already exists at %s (version %s):", path, v),
+			[]string{"overwrite", "skip (keep the installed copy)", "backup (rename to .bak, then install)"},
+			1)
+		if err != nil || sel.Canceled || len(sel.Indexes) == 0 {
+			return "skip"
+		}
+		switch sel.Indexes[0] {
+		case 0:
+			return "overwrite"
+		case 2:
+			return "backup"
+		default:
+			return "skip"
+		}
+	}
 }
 
 // parsePlatforms canonicalizes the comma-separated --platform value ("all"
@@ -243,9 +393,11 @@ func (p *skillPrompter) ask(prompt string) (string, error) {
 	return strings.TrimSpace(p.sc.Text()), nil
 }
 
-// selectPlatformsAndScope runs the interactive platform menu (detected platforms
-// preselected), scope choice (default user), and a confirmation showing the
-// target paths. Canceling the confirmation returns an error (exit 1).
+// selectPlatformsAndScope runs the text-fallback interactive flow (non-TTY
+// stdin): the platform menu (detected platforms preselected), the scope
+// choice (default user), and a one-time record of the target paths. There is
+// no confirmation step (prd R2) — the choices themselves commit the run. EOF
+// or a read error cancels the interaction (mapped to exit 1 by the runner).
 func (p *skillPrompter) selectPlatformsAndScope(action string, defaultScope skill.Scope) ([]skill.Platform, skill.Scope, error) {
 	detected := skill.DetectPlatforms()
 	detectedSet := make(map[skill.Platform]bool)
@@ -294,13 +446,6 @@ func (p *skillPrompter) selectPlatformsAndScope(action string, defaultScope skil
 			return nil, "", err
 		}
 		fmt.Fprintf(p.out, "  %s: %s\n", pl, filepath.Join(root, skill.SkillName))
-	}
-	confirm, err := p.ask("Proceed? [y/N]: ")
-	if err != nil {
-		return nil, "", err
-	}
-	if !skillIsYes(confirm) {
-		return nil, "", errors.New("skill: canceled by user")
 	}
 	return platforms, scope, nil
 }
@@ -376,14 +521,4 @@ func parseInteractivePlatforms(ans string, detected []skill.Platform) ([]skill.P
 		return nil, errors.New("no platforms selected")
 	}
 	return out, nil
-}
-
-// skillIsYes reports whether a confirmation answer is affirmative.
-func skillIsYes(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "y", "yes":
-		return true
-	default:
-		return false
-	}
 }

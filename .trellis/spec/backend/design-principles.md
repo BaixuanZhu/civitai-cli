@@ -90,10 +90,57 @@ and new code should prefer them in this order:
 | `WithHTTPClient/WithBaseURL` | `api/client.go` | transport/base injection for tests |
 | nil `*hashcache.Cache` | `hashcache/store.go` | disabled cache: Get misses, Put/Save no-ops — a nil object pattern; the cmd layer passes nil for `CIV_NO_CACHE` |
 | `ConflictFunc` | `skill/install.go` | caller-supplied conflict resolution callback |
+| `var skillMenuSelectMulti` / `skillMenuSelectOne` / `skillStdinIsConsole` | `cmd/skill.go` | tests fake arrow-key menus or force the text-fallback path |
 
 These package-level vars are the *only* sanctioned mutable package state.
 Do not add another global; add (or extend) a seam, injection point, or option
 instead.
+
+### Interactive terminal UI (menus)
+
+**What**: TTY-only prompts (arrow-key menus) live in `internal/console` — a
+leaf package with zero `internal/` imports and hand-written kernel32
+syscalls, mirroring `internal/env`. Wording, option rows, and the
+menu-vs-fallback decision stay in the consuming command (consumer-side
+seam); `console` knows nothing about the domain. `civ skill` (2026-11-23)
+is the template.
+
+**Contract** (`internal/console/console.go`):
+
+```go
+type Selection struct{ Indexes []int; Canceled bool }
+func SelectMulti(title string, rows []string, preselect []int) (Selection, error)
+func SelectOne(title string, rows []string, defaultIdx int) (Selection, error)
+func IsTerminal(fd uintptr) bool
+```
+
+- Raw modes: stdin minus line/echo/processed input plus VT input, stderr
+  plus VT processing; saved modes restored on every return path (`defer`).
+  A mode/setup failure returns an error (never panics) and the caller falls
+  back to text prompts on the same stdin.
+- Key decoding and frame rendering are pure (`keys.go`, `render.go`) and
+  table-tested offline; the syscall shell and read loop stay thin. Menu UI
+  itself is manual-smoke territory (no TTY in CI).
+- Cancel/error matrix: Esc/q/Ctrl+C at a choice menu → the command's cancel
+  error (`skill: canceled by user`, exit 1); at the install-conflict menu →
+  the safe default (`skip`); a read error mid-menu clears the drawn frame
+  first so fallback prompts never print below a stale menu skeleton.
+
+**Wrong**:
+```go
+if console.IsTerminal(os.Stdin.Fd()) { // injected *strings.Reader tests
+    runMenus()                          // hang on raw reads when go test
+}                                       // runs inside a real console
+```
+
+**Correct**:
+```go
+// Type-assert *os.File first: an injected reader is never a console, even
+// when the test process itself has one (skillStdinIsConsole in skill.go).
+if f, ok := stdin.(*os.File); ok && console.IsTerminal(f.Fd()) {
+    runMenus()
+}
+```
 
 ---
 

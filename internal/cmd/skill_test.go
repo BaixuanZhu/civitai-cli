@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"civitai-cli/internal/app"
+	"civitai-cli/internal/console"
 	"civitai-cli/internal/skill"
 )
 
@@ -179,7 +180,7 @@ func TestSkill_UpdateSkipAndOverwrite(t *testing.T) {
 func TestSkill_InteractiveInstall(t *testing.T) {
 	g, buf, home := newSkillCmdEnv(t)
 	setSkillTestVersion(t, "1.2.3-test")
-	stdin := strings.NewReader("1\nuser\ny\n") // 1=claude, scope user, confirm yes
+	stdin := strings.NewReader("1\nuser\n") // 1=claude, scope user; no confirmation step (prd R2)
 	var err error
 	stderr := captureStderr(t, func() { err = runSkillCmd(t, g, stdin, "install") })
 	if err != nil {
@@ -192,6 +193,9 @@ func TestSkill_InteractiveInstall(t *testing.T) {
 	if !strings.Contains(stderr, "Select platforms") {
 		t.Errorf("interactive flow must prompt on stderr, got %q", stderr)
 	}
+	if strings.Contains(stderr, "Proceed?") {
+		t.Errorf("text fallback must not ask for confirmation (prd R2), got %q", stderr)
+	}
 	if !strings.Contains(buf.String(), "installed") {
 		t.Errorf("summary must report installed, got %q", buf.String())
 	}
@@ -203,7 +207,7 @@ func TestSkill_InteractiveAcceptsDetected(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatalf("mkdir .claude: %v", err)
 	}
-	stdin := strings.NewReader("\n\ny\n") // empty platforms → detected, empty scope → user, confirm
+	stdin := strings.NewReader("\n\n") // empty platforms → detected, empty scope → user
 	var err error
 	captureStderr(t, func() { err = runSkillCmd(t, g, stdin, "install") })
 	if err != nil {
@@ -225,7 +229,7 @@ func TestSkill_InteractiveConflictOverwrite(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(old), 0o644); err != nil {
 		t.Fatalf("plant old: %v", err)
 	}
-	stdin := strings.NewReader("1\nuser\ny\noverwrite\n")
+	stdin := strings.NewReader("1\nuser\noverwrite\n")
 	var err error
 	captureStderr(t, func() { err = runSkillCmd(t, g, stdin, "install") })
 	if err != nil {
@@ -240,22 +244,113 @@ func TestSkill_InteractiveConflictOverwrite(t *testing.T) {
 	}
 }
 
-func TestSkill_InteractiveCancel(t *testing.T) {
-	g, _, _ := newSkillCmdEnv(t)
-	stdin := strings.NewReader("1\nuser\nn\n")
-	var err error
-	captureStderr(t, func() { err = runSkillCmd(t, g, stdin, "install") })
-	if err == nil || exitCodeFor(err, false) != 1 {
-		t.Errorf("confirmation cancel must map to exit 1, got %v", err)
-	}
-}
-
 func TestSkill_InteractiveEOF(t *testing.T) {
 	g, _, _ := newSkillCmdEnv(t)
 	var err error
 	captureStderr(t, func() { err = runSkillCmd(t, g, strings.NewReader(""), "install") })
 	if err == nil || exitCodeFor(err, false) != 1 {
 		t.Errorf("EOF during interaction must map to exit 1, got %v", err)
+	}
+}
+
+// swapSkillMenuSeams substitutes the interactive-menu seams for a test and
+// restores them afterwards (the newAPIClient pattern). Nil arguments keep
+// the current seam; gate=true forces the console path without a terminal.
+func swapSkillMenuSeams(t *testing.T, multi func(string, []string, []int) (console.Selection, error), one func(string, []string, int) (console.Selection, error), gate bool) {
+	t.Helper()
+	oldMulti, oldOne, oldGate := skillMenuSelectMulti, skillMenuSelectOne, skillStdinIsConsole
+	if multi != nil {
+		skillMenuSelectMulti = multi
+	}
+	if one != nil {
+		skillMenuSelectOne = one
+	}
+	if gate {
+		skillStdinIsConsole = func(io.Reader) bool { return true }
+	}
+	t.Cleanup(func() {
+		skillMenuSelectMulti, skillMenuSelectOne, skillStdinIsConsole = oldMulti, oldOne, oldGate
+	})
+}
+
+func TestSkill_MenuCancel(t *testing.T) {
+	g, _, _ := newSkillCmdEnv(t)
+	swapSkillMenuSeams(t,
+		func(string, []string, []int) (console.Selection, error) {
+			return console.Selection{Canceled: true}, nil // Esc/q at the platform menu
+		}, nil, true)
+	var err error
+	captureStderr(t, func() { err = runSkillCmd(t, g, strings.NewReader(""), "install") })
+	if err == nil || err.Error() != "skill: canceled by user" || exitCodeFor(err, false) != 1 {
+		t.Errorf("menu cancel must map to the canceled error + exit 1, got %v", err)
+	}
+}
+
+func TestSkill_MenuInstall(t *testing.T) {
+	g, buf, home := newSkillCmdEnv(t)
+	setSkillTestVersion(t, "1.2.3-test")
+	swapSkillMenuSeams(t,
+		func(string, []string, []int) (console.Selection, error) {
+			return console.Selection{Indexes: []int{0}}, nil // claude
+		},
+		func(_ string, _ []string, defaultIdx int) (console.Selection, error) {
+			return console.Selection{Indexes: []int{defaultIdx}}, nil // accept the default (user)
+		}, true)
+	var err error
+	var stderr string
+	stderr = captureStderr(t, func() { err = runSkillCmd(t, g, strings.NewReader(""), "install") })
+	if err != nil {
+		t.Fatalf("menu install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "civ-prompt", "SKILL.md")); err != nil {
+		t.Errorf("menu install missing SKILL.md: %v", err)
+	}
+	if !strings.Contains(stderr, "Target paths:") {
+		t.Errorf("menu flow must record the target paths once (prd R2), got %q", stderr)
+	}
+	if strings.Contains(stderr, "Proceed?") {
+		t.Errorf("menu flow must not ask for confirmation (prd R2), got %q", stderr)
+	}
+	if !strings.Contains(buf.String(), "installed") {
+		t.Errorf("summary must report installed, got %q", buf.String())
+	}
+}
+
+func TestSkill_MenuConflictCancelSkip(t *testing.T) {
+	g, buf, home := newSkillCmdEnv(t)
+	setSkillTestVersion(t, "2.0.0-test")
+	dir := filepath.Join(home, ".claude", "skills", "civ-prompt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	old := "---\nname: civ-prompt\ndescription: x\nmetadata:\n  version: \"1.0.0-old\"\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(old), 0o644); err != nil {
+		t.Fatalf("plant old: %v", err)
+	}
+	swapSkillMenuSeams(t,
+		func(string, []string, []int) (console.Selection, error) {
+			return console.Selection{Indexes: []int{0}}, nil // claude
+		},
+		func(title string, _ []string, defaultIdx int) (console.Selection, error) {
+			if strings.HasPrefix(title, "civ-prompt already exists") {
+				return console.Selection{Canceled: true}, nil // Esc at the conflict menu
+			}
+			return console.Selection{Indexes: []int{defaultIdx}}, nil
+		}, true)
+	var err error
+	captureStderr(t, func() { err = runSkillCmd(t, g, strings.NewReader(""), "install") })
+	if err != nil {
+		t.Fatalf("menu conflict install: %v", err)
+	}
+	if !strings.Contains(buf.String(), "skipped") {
+		t.Errorf("conflict-menu cancel must resolve to skip (prd R3), got %q", buf.String())
+	}
+	b, readErr := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if readErr != nil {
+		t.Fatalf("read SKILL.md: %v", readErr)
+	}
+	if !strings.Contains(string(b), "1.0.0-old") {
+		t.Errorf("skipped conflict must leave the installed copy untouched, got %q", string(b))
 	}
 }
 
