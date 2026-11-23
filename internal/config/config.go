@@ -1,13 +1,16 @@
-// Package config persists the civ API token and proxy URL and resolves
-// their priority chains. The config file lives at os.UserConfigDir()/civ/config.json
-// (%AppData%\civ on Windows) and holds {"token":"...","proxy":"..."};
-// writes use 0600 semantics (best-effort on Windows). It stays at the leaf
-// level (imports only the app and proxy leaves): the cmd layer calls
-// ResolveToken at the M1 token-resolution seam and ResolveProxy for
-// outbound proxying; login/logout call Save/Delete. Token priority is
-// --token flag > CIVITAI_API_KEY > config file (parent design D8); proxy
-// priority is --proxy flag > config file, with environment proxies applying
-// only when neither is set (task 11-22 design D2).
+// Package config persists the civ API token and the two scoped proxy URLs
+// and resolves their priority chains. The config file lives at
+// os.UserConfigDir()/civ/config.json (%AppData%\civ on Windows) and holds
+// {"token":"...","proxy":"...","githubProxy":"..."}; writes use 0600
+// semantics (best-effort on Windows). It stays at the leaf level (imports
+// only the app and proxy leaves): the cmd layer calls ResolveToken at the
+// M1 token-resolution seam and ResolveProxy for outbound proxying;
+// login/logout call Save/Delete. Token priority is --token flag >
+// CIVITAI_API_KEY > config file (parent design D8); each proxy scope
+// resolves --proxy flag > its own saved slot, with environment proxies
+// applying only when neither is set (task 11-22 design D2). The githubProxy
+// slot is consumed only by civ upgrade; data commands never read it
+// (task 11-23-github-proxy-slot).
 package config
 
 import (
@@ -21,12 +24,16 @@ import (
 )
 
 // Config is the persisted civ configuration. It stores the API token and,
-// since proxy support, the optional outbound proxy URL. The schema is
-// additive: token-only files from earlier versions decode with an empty
-// Proxy and need no migration (task 11-22 design §2).
+// since proxy support, the optional outbound proxy slots: Proxy for
+// civitai (data-command) traffic and GithubProxy for GitHub (upgrade)
+// traffic, so each scope can relay through a different proxy. The schema
+// is additive: files from earlier versions decode with empty proxy slots
+// and need no migration (task 11-22 design §2; the github slot follows the
+// same tolerant-decode contract in task 11-23-github-proxy-slot).
 type Config struct {
-	Token string `json:"token"`
-	Proxy string `json:"proxy"`
+	Token       string `json:"token"`
+	Proxy       string `json:"proxy"`
+	GithubProxy string `json:"githubProxy,omitempty"`
 }
 
 // Path returns the config file location, os.UserConfigDir()/civ/config.json.
@@ -148,4 +155,16 @@ func ResolveToken(flagToken string) string {
 func ResolveProxy(flagProxy string) string {
 	c, _ := Load()
 	return proxy.Resolve(flagProxy, c.Proxy)
+}
+
+// ResolveGithubProxy implements the GitHub-scope explicit-proxy precedence
+// chain, mirroring ResolveProxy: a flagProxy that is non-empty after
+// trimming wins, else the saved githubProxy slot. The result is consumed
+// ONLY by civ upgrade (task 11-23-upgrade-direct); data commands never read
+// the github slot, and no command reads the civitai slot for GitHub
+// traffic. Load failures degrade to "" rather than erroring, mirroring
+// ResolveProxy, so proxy resolution never blocks a command.
+func ResolveGithubProxy(flagProxy string) string {
+	c, _ := Load()
+	return proxy.Resolve(flagProxy, c.GithubProxy)
 }

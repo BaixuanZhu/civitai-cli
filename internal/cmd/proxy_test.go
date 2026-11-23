@@ -33,13 +33,14 @@ func newProxyTestGlobals(t *testing.T) (*globals, *strings.Builder) {
 }
 
 // runProxyCmd mirrors the Proxy command wiring — global flag registration
-// plus the shared arg permutation — without os.Exit, so proxy tests
-// exercise the same parse path as the real CLI (proxy has no
-// command-specific flags, hence the nil register).
+// plus the shared arg permutation, and the command's own --github flag via
+// proxyOptions.register — without os.Exit, so proxy tests exercise the
+// same parse path as the real CLI.
 func runProxyCmd(t *testing.T, g *globals, args ...string) error {
 	t.Helper()
-	pos := parseForTest(t, g, nil, args)
-	return runProxy(context.Background(), g, pos)
+	var o proxyOptions
+	pos := parseForTest(t, g, o.register, args)
+	return runProxy(context.Background(), g, pos, &o)
 }
 
 // captureLogs runs fn with the standard logger redirected to a buffer and
@@ -187,6 +188,8 @@ func TestProxy_UsageErrors(t *testing.T) {
 		{"set without url", []string{"set"}, "requires exactly one"},
 		{"set with two urls", []string{"set", "http://a:1", "http://b:2"}, "requires exactly one"},
 		{"get with argument", []string{"get", "extra"}, "takes no arguments"},
+		{"get with --github", []string{"get", "--github"}, "does not take --github"},
+		{"bare status with --github", []string{"--github"}, "applies only to set and unset"},
 		{"unset with argument", []string{"unset", "extra"}, "takes no arguments"},
 		{"unknown action", []string{"bogus"}, "unknown proxy action"},
 	}
@@ -210,9 +213,13 @@ func TestProxy_UsageErrors(t *testing.T) {
 
 // TestProxy_JsonStatusShape pins the --json contract of get / bare proxy
 // ({"persisted","effective","source"} — prd R1) plus the env-source
-// detection and the set/unset result payloads.
+// detection and the set/unset result payloads. Since the github slot
+// landed, the status payload is additive (prd R5): the top-level keys keep
+// the civitai semantics asserted here, and the nested github object is
+// pinned in TestProxy_JsonGithubAdditive.
 func TestProxy_JsonStatusShape(t *testing.T) {
-	// Source config: a persisted proxy shows up in all three fields.
+	// Source config: a persisted proxy shows up in all three fields; the
+	// empty github slot reports direct.
 	g, buf := newProxyTestGlobals(t)
 	if err := config.Save(config.Config{Token: "t", Proxy: "http://p:1"}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -220,21 +227,30 @@ func TestProxy_JsonStatusShape(t *testing.T) {
 	if err := runProxyCmd(t, g, "--json", "get"); err != nil {
 		t.Fatalf("json get: %v", err)
 	}
-	assertJSONFields(t, buf.String(), map[string]any{
+	proxySlotAssertStatusJSON(t, buf.String(), map[string]any{
 		"persisted": "http://p:1",
 		"effective": "http://p:1",
 		"source":    "config",
+	}, map[string]any{
+		"persisted": "",
+		"effective": "",
+		"source":    "direct",
 	})
 
 	// Source env: nothing persisted (fresh config dir), HTTPS_PROXY set.
 	// The explicit effective value stays empty — env applies via
-	// DefaultTransport, which only the source field makes observable.
+	// DefaultTransport, which only the source field makes observable; the
+	// github scope sees the same env.
 	g3, buf3 := newProxyTestGlobals(t)
 	t.Setenv("HTTPS_PROXY", "http://envp:1")
 	if err := runProxyCmd(t, g3, "--json", "get"); err != nil {
 		t.Fatalf("json get (env): %v", err)
 	}
-	assertJSONFields(t, buf3.String(), map[string]any{
+	proxySlotAssertStatusJSON(t, buf3.String(), map[string]any{
+		"persisted": "",
+		"effective": "",
+		"source":    "env",
+	}, map[string]any{
 		"persisted": "",
 		"effective": "",
 		"source":    "env",
@@ -326,6 +342,320 @@ func TestProxy_VerboseDebugNamesProxy(t *testing.T) {
 	})
 	if !strings.Contains(logs, "[DEBUG] proxy: no explicit proxy configured (source: direct)") {
 		t.Errorf("verbose get with nothing set must name the source, got %q", logs)
+	}
+}
+
+// TestProxy_SetScopesIsolated pins prd R2/AC1: set --github persists ONLY
+// the githubProxy slot (civitai slot and token untouched), and a plain set
+// persists ONLY the civitai slot (github slot untouched).
+func TestProxy_SetScopesIsolated(t *testing.T) {
+	g, buf := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{Token: "tok", Proxy: "http://civ:1", GithubProxy: "http://gh:1"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	if err := runProxyCmd(t, g, "set", "--github", "socks5h://127.0.0.1:1080"); err != nil {
+		t.Fatalf("set --github: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "GitHub proxy set to socks5h://127.0.0.1:1080") || !strings.Contains(out, config.Path()) {
+		t.Errorf("set --github must report the github scope, got %q", out)
+	}
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load after set --github: %v", err)
+	}
+	if c.GithubProxy != "socks5h://127.0.0.1:1080" {
+		t.Errorf("set --github must persist the github slot, got %q", c.GithubProxy)
+	}
+	if c.Proxy != "http://civ:1" || c.Token != "tok" {
+		t.Errorf("set --github must leave the civitai slot and token untouched, got %+v", c)
+	}
+
+	buf.Reset()
+	if err := runProxyCmd(t, g, "set", "http://civ:2"); err != nil {
+		t.Fatalf("plain set: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "Proxy set to http://civ:2") || strings.Contains(out, "GitHub proxy set") {
+		t.Errorf("plain set must report the civitai scope only, got %q", out)
+	}
+	c, err = config.Load()
+	if err != nil {
+		t.Fatalf("config.Load after plain set: %v", err)
+	}
+	if c.Proxy != "http://civ:2" {
+		t.Errorf("plain set must persist the civitai slot, got %q", c.Proxy)
+	}
+	if c.GithubProxy != "socks5h://127.0.0.1:1080" || c.Token != "tok" {
+		t.Errorf("plain set must leave the github slot and token untouched, got %+v", c)
+	}
+}
+
+// TestProxy_UnsetGithubOnly pins prd R3/AC1: unset --github clears only the
+// github slot (civitai slot and token preserved), is idempotent, and still
+// rewrites the file.
+func TestProxy_UnsetGithubOnly(t *testing.T) {
+	g, buf := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{Token: "tok", Proxy: "http://civ:1", GithubProxy: "http://gh:1"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	if err := runProxyCmd(t, g, "unset", "--github"); err != nil {
+		t.Fatalf("unset --github: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "GitHub proxy unset") || !strings.Contains(out, config.Path()) {
+		t.Errorf("unset --github must report the github scope, got %q", out)
+	}
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load after unset --github: %v", err)
+	}
+	if c.GithubProxy != "" {
+		t.Errorf("unset --github must clear the github slot, got %q", c.GithubProxy)
+	}
+	if c.Proxy != "http://civ:1" || c.Token != "tok" {
+		t.Errorf("unset --github must preserve the civitai slot and token, got %+v", c)
+	}
+	if _, statErr := os.Stat(config.Path()); statErr != nil {
+		t.Errorf("unset --github must rewrite the config file, never delete it: %v", statErr)
+	}
+
+	// Idempotent: a second unset --github on an empty github slot stays exit 0.
+	buf.Reset()
+	if err := runProxyCmd(t, g, "unset", "--github"); err != nil {
+		t.Fatalf("second unset --github must succeed: %v", err)
+	}
+	c, _ = config.Load()
+	if c.GithubProxy != "" || c.Proxy != "http://civ:1" || c.Token != "tok" {
+		t.Errorf("second unset --github must change nothing, got %+v", c)
+	}
+}
+
+// TestProxy_UnsetClearsBoth pins prd R3/AC1: a bare unset clears BOTH slots
+// while preserving the token, is idempotent, and still rewrites the file.
+func TestProxy_UnsetClearsBoth(t *testing.T) {
+	g, buf := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{Token: "tok", Proxy: "http://civ:1", GithubProxy: "http://gh:1"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	if err := runProxyCmd(t, g, "unset"); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "Proxy unset") || !strings.Contains(out, "both") || !strings.Contains(out, config.Path()) {
+		t.Errorf("bare unset must report both scopes cleared, got %q", out)
+	}
+	c, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load after unset: %v", err)
+	}
+	if c.Proxy != "" || c.GithubProxy != "" {
+		t.Errorf("bare unset must clear both slots, got %+v", c)
+	}
+	if c.Token != "tok" {
+		t.Errorf("bare unset must preserve the token, got %q", c.Token)
+	}
+	if _, statErr := os.Stat(config.Path()); statErr != nil {
+		t.Errorf("bare unset must rewrite the config file, never delete it: %v", statErr)
+	}
+
+	// Idempotent: a second bare unset on already-empty slots stays exit 0.
+	buf.Reset()
+	if err := runProxyCmd(t, g, "unset"); err != nil {
+		t.Fatalf("second unset must succeed: %v", err)
+	}
+}
+
+// TestProxy_SetGithubBadURLIsUsageErrorNoSave proves the validation gate
+// holds for the github scope too (prd R2): a malformed --github URL is a
+// usage error (exit 1) before any write, leaving every field intact.
+func TestProxy_SetGithubBadURLIsUsageErrorNoSave(t *testing.T) {
+	g, _ := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{Token: "tok", Proxy: "http://prior:1", GithubProxy: "http://prior-gh:2"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	err := runProxyCmd(t, g, "set", "--github", "not-a-url")
+	if err == nil || !strings.Contains(err.Error(), "missing a scheme") {
+		t.Fatalf("want missing-scheme error, got %v", err)
+	}
+	if got := exitCodeFor(err, false); got != 1 {
+		t.Errorf("bad --github URL must map to exit 1, got %d", got)
+	}
+	c, loadErr := config.Load()
+	if loadErr != nil {
+		t.Fatalf("config.Load: %v", loadErr)
+	}
+	if c.Proxy != "http://prior:1" || c.GithubProxy != "http://prior-gh:2" || c.Token != "tok" {
+		t.Errorf("rejected set --github must leave the config unchanged, got %+v", c)
+	}
+}
+
+// TestProxy_StatusTextGithubBlock pins prd R4/AC2: the three civitai lines
+// stay byte-identical and the github scope appends three lines, with the
+// per-scope source computed from that scope's slot (config when set, else
+// env, else direct).
+func TestProxy_StatusTextGithubBlock(t *testing.T) {
+	// Both slots set: every source is config; full output pinned exactly so
+	// the civitai lines cannot drift.
+	g, buf := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{
+		Token: "tok", Proxy: "http://civ:1", GithubProxy: "socks5h://127.0.0.1:1080",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := runProxyCmd(t, g, "get"); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	want := "Persisted proxy: http://civ:1\n" +
+		"Effective proxy: http://civ:1\n" +
+		"Source: config\n" +
+		"GitHub persisted: socks5h://127.0.0.1:1080\n" +
+		"GitHub effective: socks5h://127.0.0.1:1080\n" +
+		"GitHub source: config\n"
+	if buf.String() != want {
+		t.Errorf("get output = %q, want %q", buf.String(), want)
+	}
+
+	// No slots, env proxy present: both scopes report env, github effective
+	// stays empty (the slot holds explicit URLs only).
+	g2, buf2 := newProxyTestGlobals(t)
+	t.Setenv("HTTPS_PROXY", "http://envp:1")
+	if err := runProxyCmd(t, g2, "get"); err != nil {
+		t.Fatalf("get (env): %v", err)
+	}
+	want = "Persisted proxy: (none)\n" +
+		"Effective proxy: (none)\n" +
+		"Source: env\n" +
+		"GitHub persisted: (none)\n" +
+		"GitHub effective: (none)\n" +
+		"GitHub source: env\n"
+	if buf2.String() != want {
+		t.Errorf("get output (env) = %q, want %q", buf2.String(), want)
+	}
+
+	// No slots, no env: both scopes report direct.
+	g3, buf3 := newProxyTestGlobals(t)
+	if err := runProxyCmd(t, g3, "get"); err != nil {
+		t.Fatalf("get (direct): %v", err)
+	}
+	for _, want := range []string{
+		"Persisted proxy: (none)",
+		"Effective proxy: (none)",
+		"Source: direct",
+		"GitHub persisted: (none)",
+		"GitHub effective: (none)",
+		"GitHub source: direct",
+	} {
+		if !strings.Contains(buf3.String(), want) {
+			t.Errorf("get output (direct) %q must contain %q", buf3.String(), want)
+		}
+	}
+}
+
+// TestProxy_JsonGithubAdditive pins prd R5/AC3: get --json keeps the old
+// top-level keys (civitai semantics) and adds the nested github object;
+// set/unset results carry "scope":"github" only when --github was used.
+func TestProxy_JsonGithubAdditive(t *testing.T) {
+	g, buf := newProxyTestGlobals(t)
+	if err := config.Save(config.Config{Token: "t", Proxy: "http://p:1", GithubProxy: "http://gh:2"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := runProxyCmd(t, g, "--json", "get"); err != nil {
+		t.Fatalf("json get: %v", err)
+	}
+	proxySlotAssertStatusJSON(t, buf.String(),
+		map[string]any{"persisted": "http://p:1", "effective": "http://p:1", "source": "config"},
+		map[string]any{"persisted": "http://gh:2", "effective": "http://gh:2", "source": "config"})
+
+	// set --json: old shape, no scope key.
+	g2, buf2 := newProxyTestGlobals(t)
+	if err := runProxyCmd(t, g2, "--json", "set", "http://127.0.0.1:7890"); err != nil {
+		t.Fatalf("json set: %v", err)
+	}
+	assertJSONFields(t, buf2.String(), map[string]any{
+		"status": "set", "proxy": "http://127.0.0.1:7890", "config": config.Path(),
+	})
+
+	// set --github --json: scope key present.
+	buf2.Reset()
+	if err := runProxyCmd(t, g2, "--json", "set", "--github", "http://gh:9"); err != nil {
+		t.Fatalf("json set --github: %v", err)
+	}
+	assertJSONFields(t, buf2.String(), map[string]any{
+		"status": "set", "proxy": "http://gh:9", "config": config.Path(), "scope": "github",
+	})
+
+	// unset --json: old shape, no scope, no proxy.
+	buf2.Reset()
+	if err := runProxyCmd(t, g2, "--json", "unset"); err != nil {
+		t.Fatalf("json unset: %v", err)
+	}
+	assertJSONFields(t, buf2.String(), map[string]any{
+		"status": "unset", "config": config.Path(),
+	})
+
+	// unset --github --json: scope key present, proxy still omitted.
+	buf2.Reset()
+	if err := runProxyCmd(t, g2, "--json", "unset", "--github"); err != nil {
+		t.Fatalf("json unset --github: %v", err)
+	}
+	assertJSONFields(t, buf2.String(), map[string]any{
+		"status": "unset", "config": config.Path(), "scope": "github",
+	})
+}
+
+// proxySlotAssertStatusJSON unmarshals a status --json payload and checks
+// the top-level civitai fields (exact key set, old semantics) plus the
+// nested github scope object (exact key set) — the additive R5 shape.
+func proxySlotAssertStatusJSON(t *testing.T, out string, wantTop, wantGithub map[string]any) {
+	t.Helper()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json output %q: %v", out, err)
+	}
+	gh, ok := got["github"].(map[string]any)
+	if !ok {
+		t.Fatalf("status json must carry the nested github object, got %v", got)
+	}
+	delete(got, "github")
+	if len(got) != len(wantTop) {
+		t.Errorf("top-level status has %d fields (%v), want exactly %d (%v)", len(got), got, len(wantTop), wantTop)
+	}
+	for k, v := range wantTop {
+		if gv, ok := got[k]; !ok || gv != v {
+			t.Errorf("top-level field %q = %v, want %v", k, gv, v)
+		}
+	}
+	if len(gh) != len(wantGithub) {
+		t.Errorf("github object has %d fields (%v), want exactly %d (%v)", len(gh), gh, len(wantGithub), wantGithub)
+	}
+	for k, v := range wantGithub {
+		if gv, ok := gh[k]; !ok || gv != v {
+			t.Errorf("github field %q = %v, want %v", k, gv, v)
+		}
+	}
+}
+
+// TestProxyHelp_DocumentsGithubScope pins prd R7: the curated page documents
+// the two scopes, --github on set/unset, and the per-scope precedence
+// chains, while keeping the page-layout contract (Usage before Examples, no
+// embedded global block) the help-routing wave asserts.
+func TestProxyHelp_DocumentsGithubScope(t *testing.T) {
+	for _, want := range []string{
+		"--github",
+		"civitai",
+		"github",
+		"upgrade",
+		"set --github",
+		"unset --github",
+		"HTTP_PROXY/HTTPS_PROXY",
+		"{persisted, effective, source, github:{persisted, effective, source}}",
+	} {
+		if !strings.Contains(proxyHelp, want) {
+			t.Errorf("proxyHelp must mention %q", want)
+		}
+	}
+	if strings.Contains(proxyHelp, "Global flags") {
+		t.Errorf("proxyHelp must not embed the global flags block (writeCommandHelp appends it)")
 	}
 }
 

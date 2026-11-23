@@ -285,3 +285,116 @@ func TestSaveLoadRoundTripProxy(t *testing.T) {
 		t.Errorf("round-trip = {Token: %q, Proxy: %q}, want both preserved", c.Token, c.Proxy)
 	}
 }
+
+// TestSaveLoadRoundTripGithubProxy asserts the github slot round-trips
+// alongside the token and the civitai slot with the documented JSON shape
+// (prd AC4): the githubProxy key is present when set, and omitempty keeps
+// it out of files that never set it.
+func TestSaveLoadRoundTripGithubProxy(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	if err := Save(Config{
+		Token:       "secret-key",
+		Proxy:       "http://127.0.0.1:7890",
+		GithubProxy: "socks5h://127.0.0.1:1080",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	b, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("config file must exist after Save: %v", err)
+	}
+	if !strings.Contains(string(b), `"githubProxy"`) || !strings.Contains(string(b), "socks5h://127.0.0.1:1080") {
+		t.Errorf("config file shape unexpected: %s", b)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Token != "secret-key" || c.Proxy != "http://127.0.0.1:7890" || c.GithubProxy != "socks5h://127.0.0.1:1080" {
+		t.Errorf("round-trip = %+v, want all three fields preserved", c)
+	}
+
+	// omitempty: a config without a github slot must not grow the key.
+	setConfigDir(t, t.TempDir())
+	if err := Save(Config{Token: "secret-key", Proxy: "http://127.0.0.1:7890"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	b, err = os.ReadFile(Path())
+	if err != nil {
+		t.Fatalf("config file must exist after Save: %v", err)
+	}
+	if strings.Contains(string(b), "githubProxy") {
+		t.Errorf("empty github slot must be omitted (omitempty), got: %s", b)
+	}
+}
+
+// TestLoad_OldFileWithoutGithubProxy pins the additive-schema contract for
+// the second slot (prd AC4): a config written before the github slot
+// (token + civitai proxy only) decodes with an empty GithubProxy — no
+// migration needed.
+func TestLoad_OldFileWithoutGithubProxy(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(Path(), []byte(`{"token":"secret-key","proxy":"http://127.0.0.1:7890"}`), 0o600); err != nil {
+		t.Fatalf("write old config: %v", err)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Token != "secret-key" || c.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("old file must keep token and proxy, got %+v", c)
+	}
+	if c.GithubProxy != "" {
+		t.Errorf("old file must decode GithubProxy as empty, got %q", c.GithubProxy)
+	}
+}
+
+// TestResolveGithubProxy_Priority mirrors TestResolveProxy_Priority for the
+// github slot (prd R1): a trimmed non-empty flag wins, else the saved
+// slot, with corrupt configs degrading to "" and warning instead of
+// blocking.
+func TestResolveGithubProxy_Priority(t *testing.T) {
+	cases := []struct {
+		name        string
+		flag        string
+		configProxy string
+		corrupt     bool
+		want        string
+	}{
+		{"flag wins over persisted", "http://127.0.0.1:7891", "socks5h://10.0.0.1:1080", false, "http://127.0.0.1:7891"},
+		{"empty flag falls back to persisted", "", "socks5h://10.0.0.1:1080", false, "socks5h://10.0.0.1:1080"},
+		{"missing config file yields empty (env/direct)", "", "", false, ""},
+		{"whitespace flag falls through to persisted", "   ", "http://10.0.0.1:8080", false, "http://10.0.0.1:8080"},
+		{"whitespace flag with no config yields empty", " \t ", "", false, ""},
+		{"corrupt config file degrades to empty", "", "http://10.0.0.1:8080", true, ""},
+		{"flag still wins over corrupt config", "http://127.0.0.1:7891", "http://10.0.0.1:8080", true, "http://127.0.0.1:7891"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setConfigDir(t, t.TempDir())
+			if tc.corrupt {
+				if err := os.MkdirAll(filepath.Dir(Path()), 0o700); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.WriteFile(Path(), []byte("{not json"), 0o600); err != nil {
+					t.Fatalf("write corrupt: %v", err)
+				}
+			} else if tc.configProxy != "" {
+				if err := Save(Config{Token: "tok", GithubProxy: tc.configProxy}); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+			}
+			var got string
+			logs := captureLog(t, func() { got = ResolveGithubProxy(tc.flag) })
+			if got != tc.want {
+				t.Errorf("ResolveGithubProxy(%q) = %q, want %q", tc.flag, got, tc.want)
+			}
+			if tc.corrupt && !strings.Contains(logs, "corrupt") {
+				t.Errorf("corrupt config must warn on stderr, logs: %s", logs)
+			}
+		})
+	}
+}
