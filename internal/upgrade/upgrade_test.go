@@ -256,8 +256,8 @@ func TestDownloadOnce_Non200(t *testing.T) {
 }
 
 // setConfigDir points os.UserConfigDir at dir for the duration of the test so
-// applyPersistedProxy reads a config file the test controls, never a real
-// user profile. Windows resolves the config dir from %AppData%; Unix from
+// applyProxy reads a config file the test controls, never a real user
+// profile. Windows resolves the config dir from %AppData%; Unix from
 // $XDG_CONFIG_HOME (mirrors internal/config's isolation helper).
 func setConfigDir(t *testing.T, dir string) {
 	t.Helper()
@@ -290,46 +290,59 @@ func proxyURLOf(t *testing.T, tr *http.Transport) string {
 	return u.String()
 }
 
-func TestApplyPersistedProxy_SetsTransport(t *testing.T) {
+// TestRun_CivitaiSlotIgnored (prd AC1): a valid proxy in the civitai slot
+// must NOT route upgrade traffic — after run setup downloadClient.Transport
+// stays nil, so the GitHub check would go direct (subject only to env).
+func TestRun_CivitaiSlotIgnored(t *testing.T) {
 	setConfigDir(t, t.TempDir())
 	isolateDownloadClient(t)
 
-	const proxyURL = "http://127.0.0.1:7890"
-	if err := config.Save(config.Config{Proxy: proxyURL}); err != nil {
+	const civProxy = "http://127.0.0.1:7890"
+	if err := config.Save(config.Config{Proxy: civProxy}); err != nil {
 		t.Fatal(err)
 	}
 
-	applyPersistedProxy()
+	if err := applyProxy(nil); err != nil {
+		t.Fatalf("applyProxy: %v", err)
+	}
+	if downloadClient.Transport != nil {
+		t.Errorf("downloadClient.Transport = %T, want nil (civitai slot %q must be ignored)", downloadClient.Transport, civProxy)
+	}
+}
 
+// TestRun_GithubSlotConsumed (prd AC1b, valid slot): a valid githubProxy saved
+// via `civ proxy set --github` is consumed when no --proxy flag is given: the
+// transport's Proxy resolves to the slot URL.
+func TestRun_GithubSlotConsumed(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	isolateDownloadClient(t)
+
+	const slotURL = "http://127.0.0.1:7890"
+	if err := config.Save(config.Config{GithubProxy: slotURL}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyProxy(nil); err != nil {
+		t.Fatalf("applyProxy: %v", err)
+	}
 	tr, ok := downloadClient.Transport.(*http.Transport)
 	if !ok || tr == nil {
 		t.Fatalf("downloadClient.Transport = %T, want *http.Transport", downloadClient.Transport)
 	}
-	if got := proxyURLOf(t, tr); got != proxyURL {
-		t.Errorf("Transport.Proxy = %q, want %q", got, proxyURL)
+	if got := proxyURLOf(t, tr); got != slotURL {
+		t.Errorf("Transport.Proxy = %q, want slot URL %q", got, slotURL)
 	}
 }
 
-func TestApplyPersistedProxy_NoProxyKeepsNilTransport(t *testing.T) {
-	setConfigDir(t, t.TempDir()) // empty dir: no config file
-	isolateDownloadClient(t)
-
-	applyPersistedProxy()
-
-	if downloadClient.Transport != nil {
-		t.Errorf("downloadClient.Transport = %T, want nil (env proxies via DefaultTransport)", downloadClient.Transport)
-	}
-}
-
-// TestApplyPersistedProxy_InvalidSavedValueDegrades pins the degrade path: a
-// hand-edited config can hold an invalid proxy (config.Save does not
-// validate; validation happens at `civ proxy set`), and the apply step must
-// warn and keep the nil Transport instead of failing the upgrade.
-func TestApplyPersistedProxy_InvalidSavedValueDegrades(t *testing.T) {
+// TestRun_GithubSlotInvalidDegrades (prd AC1b, invalid slot): a hand-edited
+// config can hold an invalid proxy (config.Save does not validate), and the
+// apply step must warn on stderr and keep the nil Transport — falling back to
+// env/direct — instead of failing the run.
+func TestRun_GithubSlotInvalidDegrades(t *testing.T) {
 	setConfigDir(t, t.TempDir())
 	isolateDownloadClient(t)
 
-	if err := config.Save(config.Config{Proxy: "ftp://127.0.0.1:21"}); err != nil {
+	if err := config.Save(config.Config{GithubProxy: "ftp://127.0.0.1:21"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -341,35 +354,135 @@ func TestApplyPersistedProxy_InvalidSavedValueDegrades(t *testing.T) {
 	log.SetFlags(0)
 	t.Cleanup(func() { log.SetOutput(old); log.SetFlags(oldFlags) })
 
-	applyPersistedProxy() // must not panic
-
+	if err := applyProxy(nil); err != nil {
+		t.Fatalf("applyProxy must not fail on an invalid slot: %v", err)
+	}
 	if downloadClient.Transport != nil {
-		t.Errorf("downloadClient.Transport = %T, want nil after invalid saved proxy", downloadClient.Transport)
+		t.Errorf("downloadClient.Transport = %T, want nil after invalid github slot", downloadClient.Transport)
 	}
 	if !strings.Contains(buf.String(), "[WARN]") {
 		t.Errorf("expected a [WARN] degrade line on stderr, got log %q", buf.String())
 	}
 }
 
+// TestRun_ProxyFlagWinsOverSlot (prd AC2): an explicit --proxy flag beats a
+// saved github slot — the installed transport's Proxy resolves to the flag
+// URL, not the slot URL.
+func TestRun_ProxyFlagWinsOverSlot(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	isolateDownloadClient(t)
+
+	const slotURL = "http://127.0.0.1:7890"
+	const flagURL = "http://127.0.0.1:1080"
+	if err := config.Save(config.Config{GithubProxy: slotURL}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyProxy([]string{"--proxy", flagURL}); err != nil {
+		t.Fatalf("applyProxy: %v", err)
+	}
+	tr, ok := downloadClient.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("downloadClient.Transport = %T, want *http.Transport", downloadClient.Transport)
+	}
+	if got := proxyURLOf(t, tr); got != flagURL {
+		t.Errorf("Transport.Proxy = %q, want flag URL %q (must win over slot %q)", got, flagURL, slotURL)
+	}
+}
+
+// TestRun_ProxyFlagInstallsTransport (prd AC2): the flag installs a transport
+// on downloadClient, the single client both fetchLatestRelease (API check)
+// and downloadOnce (asset download) ride — so one flag routes both.
+func TestRun_ProxyFlagInstallsTransport(t *testing.T) {
+	setConfigDir(t, t.TempDir()) // empty dir: no config file
+	isolateDownloadClient(t)
+
+	const flagURL = "http://127.0.0.1:7890"
+	if err := applyProxy([]string{"--proxy", flagURL}); err != nil {
+		t.Fatalf("applyProxy: %v", err)
+	}
+	tr, ok := downloadClient.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("downloadClient.Transport = %T, want *http.Transport", downloadClient.Transport)
+	}
+	if got := proxyURLOf(t, tr); got != flagURL {
+		t.Errorf("Transport.Proxy = %q, want %q", got, flagURL)
+	}
+}
+
+// TestRun_InvalidProxyFlagExitsBeforeNetwork (prd AC3): an invalid --proxy
+// value is a usage error — Run maps the returned error to exit 1 via app.Fail
+// before any network dial. applyProxy never touches the network, so calling
+// it directly proves the pre-network contract; the error must name the
+// validation problem for the stderr line.
+func TestRun_InvalidProxyFlagExitsBeforeNetwork(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	isolateDownloadClient(t)
+
+	err := applyProxy([]string{"--proxy", "not-a-url"})
+	if err == nil {
+		t.Fatal("expected a usage error for --proxy not-a-url")
+	}
+	if !strings.Contains(err.Error(), "invalid --proxy value") || !strings.Contains(err.Error(), "not-a-url") {
+		t.Errorf("error must name the validation problem, got: %v", err)
+	}
+	if downloadClient.Transport != nil {
+		t.Errorf("no route may be installed for an invalid flag, got %T", downloadClient.Transport)
+	}
+}
+
+// TestRun_BadArgsUsageError (prd AC4): --proxy with a missing value, unknown
+// flags, and extra positionals are all usage errors — exit 1 (via Run's
+// app.Fail) before any network access.
+func TestRun_BadArgsUsageError(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"--proxy missing value", []string{"--proxy"}},
+		{"unknown flag", []string{"--bogus"}},
+		{"extra positional", []string{"extra"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setConfigDir(t, t.TempDir())
+			isolateDownloadClient(t)
+			if err := applyProxy(tt.args); err == nil {
+				t.Errorf("args %v: expected a usage error", tt.args)
+			}
+			if downloadClient.Transport != nil {
+				t.Errorf("args %v: transport must stay nil (no network)", tt.args)
+			}
+		})
+	}
+}
+
 // TestHelp pins the curated `civ upgrade help` page contract: main prints
 // the string verbatim (so it must carry its own "civ upgrade -" title,
 // unlike the runner-routed command pages), the Usage and Examples sections
-// of the shared layout, and the upgrade-specific notes (exit codes, the
-// .bak swap, and that the --proxy flag does not apply here).
+// of the shared layout, the upgrade-specific notes (exit codes, the .bak
+// swap), the new Options section with --proxy, and the honest Proxy
+// paragraph (direct default; no stale "the --proxy flag does not apply"
+// wording).
 func TestHelp(t *testing.T) {
 	page := Help()
 	for _, want := range []string{
 		"civ upgrade - ",
 		"Usage:\n  civ upgrade",
 		"What it does:",
+		"Options:\n  --proxy <url>",
 		"Examples:\n  civ upgrade\n",
 		".bak",
 		"0 success",
-		"the --proxy flag does not apply",
+		"intentionally NOT consulted",
+		"civ proxy set --github <url>",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("upgrade help page missing %q", want)
 		}
+	}
+	if strings.Contains(page, "the --proxy flag does not apply") {
+		t.Errorf("upgrade help page must not keep the stale '--proxy flag does not apply' wording")
 	}
 	if !strings.HasSuffix(page, "\n") {
 		t.Errorf("upgrade help page must end with a newline")
@@ -379,24 +492,26 @@ func TestHelp(t *testing.T) {
 // TestHelp_SectionOrder applies the cross-all-pages layout audit (task
 // 11-22 prd AC8) to the tenth page: Help is printed verbatim by main — no
 // runner, so no appended global block — and must keep the shared order on
-// the sections it does have (Usage before Examples; no Options, upgrade is
-// flagless), document json (un)availability itself (the Output section
-// states --json does not apply), and embed no copy of any global flag row
-// (the page explains --proxy does not apply instead).
+// the sections it does have (Usage < Options < Examples < Exit codes),
+// document json (un)availability itself (the Output section states --json
+// does not apply), and embed no copy of any global flag row (the --proxy row
+// below is upgrade's OWN flag, so only the other global rows are checked).
 func TestHelp_SectionOrder(t *testing.T) {
 	page := Help()
 	u := strings.Index(page, "Usage:")
+	o := strings.Index(page, "Options:")
 	e := strings.Index(page, "Examples:")
-	if u < 0 || e < 0 || u >= e {
-		t.Errorf("upgrade help: Usage(%d) must precede Examples(%d)", u, e)
+	x := strings.Index(page, "Exit codes:")
+	if u < 0 || o < 0 || e < 0 || x < 0 {
+		t.Fatalf("upgrade help: missing section(s): Usage=%d Options=%d Examples=%d ExitCodes=%d", u, o, e, x)
 	}
-	if strings.Index(page, "Usage:") > strings.Index(page, "Exit codes:") {
-		t.Errorf("upgrade help: Usage must open the page before Exit codes")
+	if !(u < o && o < e && e < x) {
+		t.Errorf("upgrade help: section order must be Usage(%d) < Options(%d) < Examples(%d) < Exit codes(%d)", u, o, e, x)
 	}
 	if !strings.Contains(page, "--json") {
 		t.Errorf("upgrade help: must document json (un)availability — the global --json row never reaches this page")
 	}
-	for _, row := range []string{"Global flags", "--token <key>", "--proxy <url>", "--timeout <dur>"} {
+	for _, row := range []string{"Global flags", "--token <key>", "--timeout <dur>"} {
 		if strings.Contains(page, row) {
 			t.Errorf("upgrade help: must not embed the global flag row %q (main prints the page without the shared block)", row)
 		}

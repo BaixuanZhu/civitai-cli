@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,8 +46,8 @@ const exeName = "civ.exe"
 // GitHub API release check (fetchLatestRelease) and the release asset
 // downloads — without an overall timeout: timeout control is left to the
 // transfer itself so slow networks don't kill large downloads. Its Transport
-// stays nil (environment proxies apply via http.DefaultTransport) until
-// applyPersistedProxy installs the saved proxy at Run time.
+// starts each run as nil (environment proxies apply via http.DefaultTransport)
+// unless applyProxy installs a flag- or github-slot-derived transport.
 var downloadClient = &http.Client{Timeout: 0}
 
 // githubRelease mirrors the GitHub API releases/latest response (only the needed fields).
@@ -67,36 +68,62 @@ func expectedAssetName() string {
 	return fmt.Sprintf("civitai-cli-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
 }
 
-// applyPersistedProxy installs the persisted config proxy (if any) as
-// downloadClient's Transport, so all upgrade traffic (the GitHub API call and
-// the asset download, unified onto downloadClient) routes through it.
-// Upgrade honors the saved proxy and environment proxies (nil Transport
-// fallback) but NOT the --proxy flag: upgrade bypasses the global flag runner,
-// so there is no flag value to consult (task 11-22 design D7). An invalid
-// saved value degrades — warn + nil Transport, never a failed upgrade —
-// mirroring config's corrupt-file philosophy.
-func applyPersistedProxy() {
-	p := config.ResolveProxy("")
-	if p == "" {
-		return // nothing persisted: keep nil Transport (env proxies via DefaultTransport)
+// applyProxy parses the invocation's own args (--proxy) and installs the
+// resolved proxy as downloadClient's Transport, so the GitHub API check and
+// the asset download (unified onto downloadClient) share one route.
+// Precedence: --proxy flag > saved github slot (config.ResolveGithubProxy) >
+// environment via nil Transport (http.DefaultTransport) > direct; the civ
+// proxy slot is never read here — shared proxy IPs are what GitHub
+// rate-limits with 403 (task 11-23-upgrade-direct design D1).
+//
+// An invalid --proxy flag value is a usage error: it is returned so Run exits
+// 1 before any network access. An invalid hand-edited github slot instead
+// degrades — a [WARN] line on stderr and the nil Transport kept — mirroring
+// config's corrupt-file philosophy: a bad saved value must never fail an
+// upgrade (design D3). The Transport is reset to nil before resolution so
+// every run starts from env/direct semantics unless a flag/slot transport
+// installs below.
+func applyProxy(args []string) error {
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	proxyFlag := fs.String("proxy", "", "relay GitHub traffic through this proxy for this invocation")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("invalid usage: %w (try \"civ upgrade help\")", err)
 	}
-	tr, err := proxy.NewTransport(p)
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q (usage: civ upgrade [--proxy <url>])", fs.Arg(0))
+	}
+	if v := *proxyFlag; v != "" {
+		if _, err := proxy.Validate(v); err != nil {
+			return fmt.Errorf("invalid --proxy value: %w", err)
+		}
+	}
+
+	downloadClient.Transport = nil
+	resolved := config.ResolveGithubProxy(*proxyFlag)
+	if resolved == "" {
+		return nil // no explicit proxy: env proxies via http.DefaultTransport
+	}
+	tr, err := proxy.NewTransport(resolved)
 	if err != nil {
-		app.Warnf("invalid saved proxy %q (%v); falling back to environment/direct", p, err)
-		return
+		// Only reachable for a hand-edited github slot: the flag value was
+		// validated above, so degrade instead of failing the upgrade.
+		app.Warnf("invalid github proxy %q (%v); falling back to environment/direct", resolved, err)
+		return nil
 	}
 	downloadClient.Transport = tr
+	return nil
 }
 
-// Help returns the curated `civ upgrade help` page as a string (upgrade
-// has no flags of its own; the page documents behavior, exit codes, and
-// the .bak swap). main prints it for `civ upgrade help` / -h / --help and
-// returns exit 0; Run() behavior is unchanged.
+// Help returns the curated `civ upgrade help` page as a string. main prints
+// it verbatim for `civ upgrade help` / -h / --help and returns exit 0; Run()
+// behavior (including --proxy) is unchanged.
 func Help() string {
 	return `civ upgrade - Self-update from the latest GitHub Release
 
 Usage:
-  civ upgrade
+  civ upgrade [--proxy <url>]
 
 What it does:
   Checks the latest GitHub Release, compares it with the running version
@@ -108,30 +135,47 @@ What it does:
   is deleted immediately on success, or on the next startup if the old
   process still holds it.
 
+Options:
+  --proxy <url>  relay the GitHub API check and asset download through
+    this proxy for this invocation only (values: http, https, socks5,
+    socks5h; default: none — direct connection). An invalid value is a
+    usage error (exit 1) before any network access. Wins over the github
+    proxy slot.
+
+Examples:
+  civ upgrade
+  civ upgrade --proxy http://127.0.0.1:7890
+  civ upgrade -h
+
 Exit codes:
   0 success or already up to date   1 check, download, verify, or replace failure
+  (a usage error, e.g. an invalid --proxy value, also exits 1 before any
+  network access)
 
 Output:
   Human-readable progress lines on stdout; --json does not apply (upgrade
   bypasses the global flag runner, so there is no machine-output form).
 
 Proxy:
-  Honors the saved proxy (civ proxy set) and the HTTP(S)_PROXY/NO_PROXY
-  environment variables; the --proxy flag does not apply to upgrade.
-
-Examples:
-  civ upgrade
-  civ upgrade -h
+  Connects to GitHub directly by default. The civ proxy slot
+  (civ proxy set) is intentionally NOT consulted — GitHub rate-limits
+  shared proxy IPs with 403. With no --proxy flag, the github proxy slot
+  (civ proxy set --github <url>) is honored; otherwise
+  HTTP(S)_PROXY/NO_PROXY environment variables apply. An invalid github
+  slot value warns and degrades to env/direct, never failing the upgrade.
 `
 }
 
-// Run checks for and installs the latest version. It never returns on a fatal
-// error (app.Fail prints to stderr and exits 1); on success or "already current"
-// it returns normally so main can exit 0.
-func Run() {
-	// Upgrade applies the persisted config proxy + env, but not the --proxy
-	// flag (D7: upgrade bypasses the global flag runner).
-	applyPersistedProxy()
+// Run checks for and installs the latest version. args is everything after
+// "civ upgrade" (main has already routed bare help tokens to Help); Run parses
+// its own --proxy flag via applyProxy. A usage error — unknown flag, extra
+// argument, or an invalid --proxy value — fails via app.Fail (stderr + exit
+// 1) before any network access; on success or "already current" it returns
+// normally so main can exit 0.
+func Run(args []string) {
+	if err := applyProxy(args); err != nil {
+		app.Fail(err)
+	}
 
 	fmt.Printf("Checking the latest release of %s...\n", githubRepo)
 	rel, err := fetchLatestRelease()
@@ -217,8 +261,8 @@ func Run() {
 }
 
 // fetchLatestRelease calls the GitHub API for the latest release. It rides
-// downloadClient (not http.DefaultClient) so the persisted proxy applies to
-// this call too and upgrade traffic stays on one client.
+// downloadClient (not http.DefaultClient) so the run's resolved proxy applies
+// to this call too and upgrade traffic stays on one client.
 func fetchLatestRelease() (*githubRelease, error) {
 	u := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
