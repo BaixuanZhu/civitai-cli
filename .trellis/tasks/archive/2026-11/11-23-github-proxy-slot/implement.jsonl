@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/design-principles.md", "reason": "config mirrors the existing token/proxy resolver pattern (P3 extensibility recipe); proxy cmd gains its first own flag via the standard options+register recipe"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "config.Proxy/GithubProxy field placement and the cmd/proxy ownership boundary; upgrade untouched here"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Validation-before-write contract and usage-error exit mapping for set --github"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Status/report lines stay on stdout; no logging additions"}
+{"file": ".trellis/tasks/archive/2026-11/11-22-proxy-support/design.md", "reason": "Original proxy contract being extended with the second scope; keep precedence wording consistent"}

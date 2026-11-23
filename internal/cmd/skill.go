@@ -19,8 +19,8 @@ import (
 )
 
 // skillHelp is the curated `civ skill help` / `-h` page (without the
-// shared global block, which writeCommandHelp appends): the actions, the
-// platform/scope/force flags, interactive mode, and the --json shape.
+// shared global block, which writeCommandHelp appends): the actions and
+// the platform/scope/force flags.
 const skillHelp = `install, remove, or update the bundled civ-prompt skill
 
 Usage:
@@ -38,19 +38,6 @@ Examples:
   civ skill install --platform zcode --scope project
   civ skill install --platform all --force
   civ skill update --platform claude,zcode
-
-Notes:
-  Without --platform the command asks interactively: on a terminal it
-  shows arrow-key menus (up/down move, space toggles, a toggles all,
-  Enter accepts; q or Esc cancels with exit 1), otherwise it prompts on
-  stderr and reads stdin. Detected platforms come preselected in both
-  UIs, the resolved target paths print once, and the action runs
-  immediately (no confirmation step). Each platform gets its native
-  skill root: .claude/skills, .zcode/skills, or the shared .agents/skills
-  for codex. update rewrites only installed skills whose version differs
-  from the running one (use install for a fresh target). --json prints
-  an array of {platform, path, action} results. Local file operations
-  only, no network.
 `
 
 // Skill runs the skill command: civ skill <install|remove|update> [flags]. It
