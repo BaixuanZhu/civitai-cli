@@ -142,6 +142,7 @@ func TestSearch_ViewValidation(t *testing.T) {
 		{"view requires json", []string{"anima", "--view", "full"}, "--view requires --json"},
 		{"unknown view", []string{"anima", "--json", "--view", "huge"}, "valid values: compact, full"},
 		{"empty view", []string{"anima", "--json", "--view="}, `unknown --view ""`},
+		{"uppercase view", []string{"anima", "--json", "--view", "COMPACT"}, `unknown --view "COMPACT"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

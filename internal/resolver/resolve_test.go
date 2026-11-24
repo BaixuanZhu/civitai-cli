@@ -258,6 +258,7 @@ func TestParseRef_RejectsUsageForms(t *testing.T) {
 		{"version non-numeric", "version:abc"},
 		{"version leading zeros", "version:007"},
 		{"version negative", "version:-1"},
+		{"version overflow", "version:999999999999999999999"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

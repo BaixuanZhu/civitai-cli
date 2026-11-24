@@ -83,6 +83,9 @@ func TestCompareValidationBeforeHTTP(t *testing.T) {
 		{"models", "1", "1"},
 		{"models", "0", "2"},
 		{"models", "abc", "2"},
+		{"models", "0x10", "2"},
+		{"models", "999999999999999999999", "2"},
+		{"Models", "1", "2"},
 		{"versions", "1", "2", "--diff", "--json"},
 	}
 	for _, args := range cases {

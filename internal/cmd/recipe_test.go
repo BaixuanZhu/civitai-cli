@@ -478,6 +478,9 @@ func TestRecipe_UsageErrorsBeforeNetwork(t *testing.T) {
 		{"count below range", []string{"3263843", "--examples", "-1"}},
 		{"zero example index", []string{"3263843", "--example", "0"}},
 		{"negative example index", []string{"3263843", "--example", "-1"}},
+		{"version id overflow", []string{"999999999999999999999999"}},
+		{"whitespace-padded id", []string{" 3263843"}},
+		{"unicode digits", []string{"１２３"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -506,6 +509,9 @@ func TestRecipe_MalformedSelectorValues(t *testing.T) {
 		{"3263843", "--examples", "abc"},
 		{"3263843", "--example", "abc"},
 		{"3263843", "--source", "community", "--limit", "abc"},
+		{"3263843", "--examples", "999999999999999999999"},
+		{"3263843", "--example", "999999999999999999999"},
+		{"3263843", "--source", "community", "--limit", "999999999999999999999"},
 		{"-5"}, // a leading-dash positional is flag syntax, rejected before network
 	} {
 		fs := flag.NewFlagSet("recipe", flag.ContinueOnError)
@@ -1074,6 +1080,7 @@ func TestRecipe_CommunityUsageErrorsBeforeNetwork(t *testing.T) {
 		{"community with example", []string{"3263843", "--source", "community", "--example", "1"}},
 		{"community invalid version", []string{"abc", "--source", "community"}},
 		{"community zero version", []string{"0", "--source", "community"}},
+		{"community version overflow", []string{"999999999999999999999999", "--source", "community"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

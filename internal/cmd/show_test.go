@@ -236,6 +236,7 @@ func TestShow_ViewValidation(t *testing.T) {
 		{"view requires json", []string{"2458426", "--view", "compact"}, "--view requires --json"},
 		{"view conflicts with prompts", []string{"2458426", "-v", "3263843", "--json", "--prompts", "--view", "compact"}, "--view cannot be combined with --prompts"},
 		{"unknown view", []string{"2458426", "--json", "--view", "bogus"}, "valid values: compact, full"},
+		{"uppercase view", []string{"2458426", "--json", "--view", "COMPACT"}, `unknown --view "COMPACT"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
