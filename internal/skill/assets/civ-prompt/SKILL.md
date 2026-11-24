@@ -62,7 +62,9 @@ generate images. You assemble the prompt; the user's image tool renders it.
 - Anonymous by default: no token is needed for search/show/vet/tags. A token
   (`civ login`) only unlocks personal-state and gated NSFW queries.
 - `--json` is machine-readable; parse it rather than scraping the human table.
-- Images whose meta is null are skipped and counted (`skipped`); they carry no recipe.
+- Missing metadata never yields a recipe: in `civ recipe` it appears as
+  `metadataStatus: notProvided` and `selection.withoutMetadata`; in the legacy
+  `show -v --prompts` view those images are counted in `skipped`.
 - `civ recipe` summaries are prompt-free by design. Do not expect or invent prompt
   text from the summary; select one example explicitly for its text.
 - `civ search --json` and `civ show --json` default to compact envelopes; use
