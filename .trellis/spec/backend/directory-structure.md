@@ -45,13 +45,22 @@ civitai-cli/
 │   │   ├── enums.go        #   CLI->API mapping tables (sort/period/type/baseModel whitelist)
 │   │   ├── models.go       #   SearchModels, GetModel
 │   │   ├── versions.go     #   GetVersion, GetVersionByHash
-│   │   └── tags.go         #   ListTags
+│   │   ├── tags.go         #   ListTags
+│   │   ├── compact*.go     #   compact search/show envelopes (civ.search/v1, civ.show/v1)
+│   │   ├── recipe.go       #   official recipe summary/detail + shared scalar normalizer
+│   │   ├── images.go       #   bounded GET /images list + exact-image detail
+│   │   ├── community.go    #   community recipe sample/detail projection
+│   │   └── compare.go      #   presence-aware model/version/file comparison snapshots
+│   ├── resolver/           # pure readiness policy: ref grammar, evidence correlation, report
+│   │   ├── types.go policy.go resolve.go
+│   ├── compare/            # pure comparison semantics: registries, tri-state equality, diffs
+│   │   ├── compare.go diff.go
 │   ├── cmd/                # command handlers: flag parse -> api -> report -> exit code
 │   │   ├── globals.go      #   globals, registerGlobalFlags, execute/executeWithExitCode,
 │   │   │                   #   exitCodeFor, printErrorHint, permuteArgs, newAPIClient seam
 │   │   ├── help.go         #   per-command help pages: globalHelpBlock, writeCommandHelp,
 │   │   │                   #   isBareHelp (stdout + exit 0 for `civ <cmd> help` / -h)
-│   │   ├── search.go show.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
+│   │   ├── search.go show.go recipe.go resolve.go compare.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
 │   ├── config/             # leaf: token + scoped proxy persistence, priority resolution
 │   │   └── config.go       #   token + scoped proxy slots (proxy, githubProxy); Path/Load/Save/Delete, ResolveToken/ResolveProxy(ResolveGithubProxy)
 │   ├── proxy/              # leaf: outbound proxy validate/resolve/transport
@@ -85,6 +94,8 @@ civitai-cli/
 main.go (dispatch + global-flag assembly + startup maintenance)
   └─ internal/cmd/*  (handler: flags -> api -> report -> exit code)
        ├─ internal/api       (Client.Get choke point + endpoint methods + types + errors)
+       ├─ internal/resolver  (pure readiness policy; environment supplied as function values)
+       ├─ internal/compare   (pure comparison semantics; snapshots arrive from api)
        ├─ internal/report    (tabwriter / JSON / k-M / date / truncate / console width)
        ├─ internal/hashcache (ComputeSHA256 + Cache)
        ├─ internal/config    (token/proxy read/write + ResolveToken/ResolveProxy)
@@ -98,6 +109,10 @@ main.go (dispatch + global-flag assembly + startup maintenance)
   `cmd`, `config`, `hashcache`, and `upgrade` can all depend on it without an
   import cycle. It holds `Version`, `Fail`, `UserAgent`, the leveled logger, and
   the `Bootstrap` gate.
+- `internal/resolver` and `internal/compare` are **pure policy packages**: no
+  HTTP, filesystem, clock, printing, or process exit. `cmd` supplies resolver
+  environment seams (lookups, stat, hash) and feeds compare snapshots decoded
+  by `api`; neither package imports `cmd`, and `api` never imports them.
 - `internal/env`, `internal/report`, `internal/hashcache`, `internal/config`,
   `internal/skill`, and `internal/proxy` are leaves (or depend only on other
   leaves: `config` imports `app` + `proxy`). `proxy` owns outbound proxy

@@ -13,9 +13,9 @@
 | # | Principle | In this codebase |
 |---|---|---|
 | P1 | **High cohesion** — one package, one job | `api` owns *all* outbound HTTP; `report` owns *all* rendering; `cmd` owns *all* flag/exit-code plumbing |
-| P2 | **Low coupling** — one-way dependencies, replaceable seams | `cmd -> api/report/hashcache/config`; leaves (`app`, `env`, `skill`) import nothing sideways; tests swap seam vars |
-| P3 | **Extensible by recipe** — growth follows a fixed checklist | New subcommand / endpoint / option / format each have a step list (below), so features never renegotiate the architecture |
-| P4 | **Maintainable by construction** — pure cores, stable contracts | `run*` functions return errors instead of exiting; exit codes 0–4 and stdout-only-results are public contracts |
+| P2 | **Low coupling** — one-way dependencies, replaceable seams | `cmd -> api/resolver/compare/report/hashcache/config`; leaves (`app`, `env`, `skill`) import nothing sideways; tests swap seam vars |
+| P3 | **Extensible by recipe** — growth follows a fixed checklist | New subcommand / endpoint / option / format / machine schema each have a step list (below), so features never renegotiate the architecture |
+| P4 | **Maintainable by construction** — pure cores, stable contracts | `run*` functions return errors instead of exiting; exit codes 0–5 (5 is resolve's completed-not-ready verdict) and stdout-only-results are public contracts |
 
 Parent design contract: `.trellis/tasks/archive/2026-11/11-22-civitai-cli-go/design.md` (§1, D1–D9).
 
@@ -31,6 +31,8 @@ sentence covers lives inside it:
 | `internal/api` | outbound HTTP, retry, auth, error classification, response decode | any printing, flag parsing, exit codes |
 | `internal/report` | tables, JSON rendering, formatting vocabulary (k/M, dates, widths) | API knowledge, logging, HTTP |
 | `internal/cmd` | flag sets, orchestration, exit-code mapping, UX | direct `net/http`, formatting arithmetic |
+| `internal/resolver` | pure readiness policy, reference validation, evidence correlation, deterministic report | HTTP, flags, printing, filesystem/env, clock, exit |
+| `internal/compare` | pure comparison registries, tri-state equality, derived differences | HTTP, flags, printing, filesystem, clock, randomness, exit |
 | `internal/hashcache` | streaming SHA256 + size/mtime cache persistence | API calls, CLI flags |
 | `internal/config` | token persistence + priority resolution | anything token-unrelated |
 | `internal/app` | Version, Fail, UserAgent, leveled logging, Bootstrap gate | any `internal/` import (it is the leaf everyone may depend on) |
@@ -164,6 +166,27 @@ Growth never renegotiates the architecture; it follows these checklists.
 4. Tests: replace the seam vars, serve `httptest` fixtures, assert output
    *and* exit codes (`cmd/vet_test.go`, `cmd/login_test.go` are templates);
    add the help-page assertions to `scripts/integration-test.sh`.
+
+### Add or change a machine-output schema
+
+1. New machine output that normalizes upstream data carries a versioned
+   envelope: `schemaVersion` + `kind` (`civ.search/v1`, `civ.show/v1`,
+   `civ.recipe/v1`, compare `schemaVersion: 1`) so a later field change is a
+   deliberate schema event, not an accident.
+2. When changing an existing default `--json` shape, keep the legacy shape
+   reachable through an explicit `--view full` (search/show pattern) and pin
+   both shapes in tests before wiring the default. An explicit view flag that
+   does nothing, or a "full" path that is compact-plus-extra-fields, is a
+   contract bug.
+3. Respect the list/detail invariant: list and summary views never carry large
+   free-form fields (prompt/negativePrompt, description HTML, raw metadata,
+   ComfyUI/workflow payloads); only an explicitly selected detail result or a
+   documented legacy detail view may. Enforce at the DTO level, not in the
+   renderer.
+4. Put policy/evaluation in a pure package (`internal/resolver`,
+   `internal/compare`) with function-value seams; `cmd` owns flags, HTTP
+   adapters, rendering, and exit mapping. Do not re-decode or reinterpret the
+   same field independently in a renderer.
 
 ### Command help pages
 

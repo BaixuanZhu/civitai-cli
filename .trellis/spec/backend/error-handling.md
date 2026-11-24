@@ -93,6 +93,11 @@ Per-command overrides via `executeWithExitCode(..., exitMap, hint)`:
   `exitCodeFor`. `vetErrorHint` prints vet-specific 404 guidance.
 - `loginExitCode`: `*api.UnauthorizedError -> 4` **regardless of `hasToken`**
   (login always probes WITH the pasted key, so a 401 means that key is invalid).
+- `resolveExitCode`: a completed evaluation with `Ready == false` maps to `5`
+  after the report is rendered to stdout; every other error delegates to
+  `exitCodeFor` unchanged. `5` is resolve's verdict class only — an
+  unregistered hash becomes a completed not-ready finding, not a
+  `NotFoundError` mapped to `1`.
 
 `execute`/`executeWithExitCode` print `civ: <err>` to stderr, call the hint
 function, then `os.Exit(code)`. Flag-parse failures and unknown commands use
