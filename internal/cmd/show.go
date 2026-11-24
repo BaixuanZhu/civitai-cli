@@ -17,14 +17,18 @@ import (
 // showOptions carries the show-specific flags. -v/--ver drill into a
 // version; the global debug flag is --verbose (no short alias) so the
 // two never collide (design D6). --prompts appends example-image recipes
-// to the version drill-down (M3).
+// to the version drill-down (M3). --view selects the JSON projection and
+// is meaningful only with --json (compact is the implicit default).
 type showOptions struct {
 	ver     int
 	prompts bool
+	view    jsonViewFlag
 }
 
 // register binds the show flags to fs.
 func (o *showOptions) register(fs *flag.FlagSet) {
+	o.view.defaultCompact()
+	fs.Var(&o.view, "view", "JSON view: compact (default, summary) or full (legacy decoded data); requires --json and conflicts with --prompts")
 	fs.IntVar(&o.ver, "v", 0, "drill into this version id (files, hashes, trigger words)")
 	fs.IntVar(&o.ver, "ver", 0, "alias of -v")
 	fs.BoolVar(&o.prompts, "prompts", false, "with -v, append example-image generation recipes (prompt/negativePrompt/steps/cfgScale/sampler/scheduler)")
@@ -69,7 +73,16 @@ func runShow(ctx context.Context, g *globals, pos []string, o *showOptions) erro
 	if err != nil || id <= 0 {
 		return fmt.Errorf("invalid model id %q (want a positive integer)", pos[0])
 	}
-	if o.prompts && o.ver <= 0 {
+	view, err := o.view.selected()
+	if err != nil {
+		return err
+	}
+	switch {
+	case o.view.set && o.prompts:
+		return errors.New("--view cannot be combined with --prompts; --prompts is its own recipe view")
+	case o.view.set && !g.JSON:
+		return errors.New("--view requires --json; human output is already a curated summary")
+	case o.prompts && o.ver <= 0:
 		return errors.New("--prompts requires -v <versionId> to select a version")
 	}
 	c := newAPIClient(g)
@@ -93,7 +106,16 @@ func runShow(ctx context.Context, g *globals, pos []string, o *showOptions) erro
 			if o.prompts {
 				return renderPrompts(g.stdout(), v.Images, true)
 			}
-			return report.WriteIndent(g.stdout(), v)
+			if view == "full" {
+				// Legacy escape path: the decoded version object exactly as
+				// the pre-compact default rendered it.
+				return report.WriteIndent(g.stdout(), v)
+			}
+			env, err := api.ParseCompactVersion(raw)
+			if err != nil {
+				return err
+			}
+			return report.WriteIndent(g.stdout(), env)
 		}
 		if err := renderVersionDetail(g.stdout(), id, v); err != nil {
 			return err
@@ -113,7 +135,16 @@ func runShow(ctx context.Context, g *globals, pos []string, o *showOptions) erro
 		return err
 	}
 	if g.JSON {
-		return report.WriteIndent(g.stdout(), m)
+		if view == "full" {
+			// Legacy escape path: the decoded model object exactly as the
+			// pre-compact default rendered it.
+			return report.WriteIndent(g.stdout(), m)
+		}
+		env, err := api.ParseCompactModel(raw)
+		if err != nil {
+			return err
+		}
+		return report.WriteIndent(g.stdout(), env)
 	}
 	return renderModel(g.stdout(), m)
 }

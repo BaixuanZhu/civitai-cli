@@ -30,6 +30,44 @@ func (f *stringListFlag) Set(s string) error {
 	return nil
 }
 
+// jsonViewFlag is the --view value shared by search and show. It records
+// whether the caller set the flag explicitly, so validation can reject a
+// view combined with human output or --prompts while the implicit compact
+// default stays a no-op. Package-level state is avoided on purpose: the
+// value lives on each command's options struct.
+type jsonViewFlag struct {
+	value string
+	set   bool
+}
+
+// String renders the current value (flag.Value interface).
+func (f *jsonViewFlag) String() string { return f.value }
+
+// Set records one --view occurrence and marks the flag explicit.
+func (f *jsonViewFlag) Set(s string) error {
+	f.value = s
+	f.set = true
+	return nil
+}
+
+// defaultCompact installs the implicit compact default before registration.
+func (f *jsonViewFlag) defaultCompact() {
+	if f.value == "" {
+		f.value = "compact"
+	}
+}
+
+// selected validates the flag value and returns "compact" or "full".
+// Unknown values (including an explicit empty value) are usage errors that
+// must be reported before any request is made.
+func (f *jsonViewFlag) selected() (string, error) {
+	switch f.value {
+	case "compact", "full":
+		return f.value, nil
+	}
+	return "", fmt.Errorf("unknown --view %q; valid values: compact, full", f.value)
+}
+
 // searchOptions carries the search-specific flags.
 type searchOptions struct {
 	types  stringListFlag
@@ -39,10 +77,13 @@ type searchOptions struct {
 	tag    string
 	user   string
 	limit  int
+	view   jsonViewFlag
 }
 
 // register binds the search flags to fs.
 func (o *searchOptions) register(fs *flag.FlagSet) {
+	o.view.defaultCompact()
+	fs.Var(&o.view, "view", "JSON view: compact (default) or full (legacy raw items); requires --json")
 	fs.Var(&o.types, "type", "model type filter; repeatable or comma-separated (lora, checkpoint, ti, locon, ...)")
 	fs.StringVar(&o.base, "base", "", "baseModel filter, comma-separated; unregistered values warn (API applies only the first)")
 	fs.StringVar(&o.sort, "sort", "hot", "sort order: hot, highest-rated, most-downloaded, most-liked, most-discussed, most-collected, most-images, newest, oldest, recently-added")
@@ -94,6 +135,13 @@ func runSearch(ctx context.Context, g *globals, pos []string, o *searchOptions) 
 		return errors.New("search requires a query, e.g. civ search stocking")
 	}
 	query := strings.Join(pos, " ")
+	view, err := o.view.selected()
+	if err != nil {
+		return err
+	}
+	if o.view.set && !g.JSON {
+		return errors.New("--view requires --json; human output is already a curated summary")
+	}
 	if o.limit < 1 || o.limit > 100 {
 		return fmt.Errorf("--limit must be 1-100 (got %d); the API hard-caps at 100", o.limit)
 	}
@@ -133,11 +181,20 @@ func runSearch(ctx context.Context, g *globals, pos []string, o *searchOptions) 
 	}
 
 	if g.JSON {
-		items, err := api.ModelsRawItems(raw)
+		if view == "full" {
+			// Legacy escape path: the verbatim upstream items array,
+			// byte-for-byte as the pre-compact default.
+			items, err := api.ModelsRawItems(raw)
+			if err != nil {
+				return err
+			}
+			return report.WriteRaw(g.stdout(), items)
+		}
+		env, err := api.ParseCompactModels(raw)
 		if err != nil {
 			return err
 		}
-		return report.WriteRaw(g.stdout(), items)
+		return report.WriteIndent(g.stdout(), env)
 	}
 	models, err := api.ParseModels(raw)
 	if err != nil {
