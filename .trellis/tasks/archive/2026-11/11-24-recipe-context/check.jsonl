@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify fixture/offline/race coverage, exact integration parity, zero dependencies, and English GoDoc/output."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check dispatch/help/completion coherence, one-request orchestration, pure command core, and no legacy output rewrites."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check usage/network/auth/not-found behavior and ensure missing recipe metadata is data rather than an invented failure."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify null/empty/unsupported distinctions survive decode, normalized DTO, human output, and JSON unchanged."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated metadata extraction or divergent recipe semantics across command and Skill consumers."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Verify recipe scope and source claims against parent evidence and prohibited export/library behavior."}

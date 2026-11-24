@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/design-principles.md","reason":"Add /images through Client.Get with tolerant DTOs and keep source projection separate from command/report orchestration."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Reuse existing API/auth/network errors and treat empty or sparse bounded samples as successful data."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use offline image fixtures, zero dependencies, English output, and mandatory integration coverage for community flags/output."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Keep summaries/results on stdout and diagnostics on stderr without leaking prompts into debug logs."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Preserve free-form metadata distinctions and prompt redaction across endpoint, projection, core adapter, and output."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse recipe normalization where reviewed and keep one owner for community resource/scalar extraction."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Apply official bounded images query, free-form civitaiResources, visibility, and no-exhaustive-pagination evidence."}

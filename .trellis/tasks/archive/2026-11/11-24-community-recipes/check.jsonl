@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify offline fixture matrix, live sparse-sample tolerance, zero dependencies, and exact CLI integration coverage."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check single outbound choke point, thin core adapter, pure projection, and no duplicate recipe engine."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify empty results and item-level drift do not become fabricated errors while envelope/API failures retain standard mapping."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit prompt redaction, raw scalar distinctions, resource provenance, and selected-detail ownership across all boundaries."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Check bounded request behavior, visibility claims, reaction interpretation, and prohibited crawling/persistence against official evidence."}

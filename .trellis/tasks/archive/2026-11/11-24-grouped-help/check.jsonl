@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify offline/full quality, exact help integration parity, English output, and no new dependency."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check that grouping is limited to top-level presentation with no command behavior, named-help, or completion drift."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check final command inventory coverage and uniqueness without duplicated command metadata or placeholder rows."}

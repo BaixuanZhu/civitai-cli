@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/design-principles.md","reason":"Follow additive command/help/completion wiring, pure run functions, one outbound client, and no speculative interfaces."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve shared recipe API error mapping and keep vet-only exit 3 and legacy degradation unchanged."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply zero-dependency, English, offline fixture, GoDoc, and integration-surface requirements to recipe."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Keep normalized results on stdout and diagnostics on stderr without logging prompt contents."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Pin presence/null/shape semantics at the API-to-recipe contract boundary rather than in renderers or Agents."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse GetVersion/report helpers and keep one owner for recipe scalar normalization without changing legacy ImageMeta output."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Use parent API evidence and excluded-scope decisions to keep recipe additive, compact, and read-only."}

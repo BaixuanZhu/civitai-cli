@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify offline/race tests, zero dependencies, English output, GoDoc, and integration-test parity for all added surface."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check additive dispatch, layer ownership, pure command cores, and no duplicated reference parsers or projections."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify legacy exit codes and error classes remain stable and resolve readiness is not confused with transport failure."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check typed metadata normalization, summary/detail boundaries, provenance, and consistent human/JSON facts."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Check claims against official images/AIR behavior and ensure excluded library/export scope was not introduced."}

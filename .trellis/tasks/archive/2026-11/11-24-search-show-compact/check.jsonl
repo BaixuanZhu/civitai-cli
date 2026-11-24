@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify offline fixture coverage, material projection-based size reduction, zero dependencies, and exact integration parity for changed JSON surface."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check that only approved search/show output changes occur and legacy raw/decoded compatibility paths remain exact if retained."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify unchanged API errors and exit codes with no partial output or new hidden fallback request."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit model/version identifiers, missing/empty semantics, and field consistency from source response through compact JSON and docs."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated or competing compact projections and unintended changes to human/prompts/vet/sync views."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Verify payload reduction and source claims against repository evidence without introducing library/export/community behavior."}

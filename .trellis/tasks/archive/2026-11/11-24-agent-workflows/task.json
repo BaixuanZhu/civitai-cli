@@ -1,0 +1,33 @@
+{
+  "id": "agent-workflows",
+  "name": "agent-workflows",
+  "title": "Agent recipe and selection workflows",
+  "description": "Plan recipe context, resource resolution, model/version comparison, and bounded community recipe sampling without changing existing CLI commands.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-24",
+  "completedAt": "2026-11-24",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-24-recipe-context",
+    "11-24-resource-resolver",
+    "11-24-model-version-compare",
+    "11-24-community-recipes",
+    "11-24-search-show-compact",
+    "11-24-grouped-help"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

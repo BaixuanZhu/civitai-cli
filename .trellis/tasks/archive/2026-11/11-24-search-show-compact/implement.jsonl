@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/design-principles.md","reason":"Add compact projections without changing endpoint orchestration, legacy behavior outside the approved policy, or command cohesion."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve current request errors, exit meanings, and stdout/stderr behavior while changing only reviewed output projection."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Require offline fixture tests, deterministic output, zero dependencies, English GoDoc/output, and integration coverage for changed defaults/views."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Map source presence and compact fields across API decode, projection, JSON, help, and migration contracts without silent data reinterpretation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing response data and report helpers while keeping one explicit compact field owner per command and no generic query framework."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Use fixture-size and source-field evidence to reduce payloads without adding requests or excluded persistence/export behavior."}

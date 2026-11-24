@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify the full ready/not-ready/operational matrix offline, integration parity, zero dependencies, GoDoc, and race quality."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check pure resolver seams, additive wiring, exact shared helper reuse, and no policy or I/O leakage into cmd."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Audit completed findings versus usage/network/token/I/O failures and unchanged legacy exit mappings."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit canonical identity, content evidence, compatibility outcomes, and finding consistency across all layers."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated vet/hash/cache logic or command-local compatibility rules."}
+{"file":".trellis/tasks/11-24-agent-workflows/research/api-evidence.md","reason":"Verify AIR and readiness claims against official evidence and prohibited library/download/generation behavior."}
