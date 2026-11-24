@@ -1295,3 +1295,78 @@ func TestRecipe_NoPersistence(t *testing.T) {
 		})
 	}
 }
+
+// TestRecipe_CommunityListErrorMapping pins the community list failure
+// contract: shared exit classes for 404/401, decode failures that keep
+// stdout empty, and exactly one non-retried /images request in each case.
+func TestRecipe_CommunityListErrorMapping(t *testing.T) {
+	t.Run("not found", func(t *testing.T) {
+		reqs := &recipeRequests{}
+		env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+			reqs.record(r.URL.Path, r.URL.Query())
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"not found"}`))
+		})
+		err := runRecipeCmd(t, env, "3263843", "--source", "community", "--json")
+		var nfe *api.NotFoundError
+		if !errors.As(err, &nfe) {
+			t.Fatalf("expected NotFoundError, got %v", err)
+		}
+		if reqs.count() != 1 || reqs.first() != recipeImagesPath {
+			t.Errorf("404 must be one /images request, got %v", reqs.pathList())
+		}
+		if got := exitCodeFor(err, false); got != 1 {
+			t.Errorf("community 404 must map to exit 1 (3 is vet-only), got %d", got)
+		}
+		if env.buf.Len() != 0 {
+			t.Errorf("failed community list must keep stdout clean")
+		}
+	})
+
+	t.Run("unauthorized", func(t *testing.T) {
+		reqs := &recipeRequests{}
+		env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+			reqs.record(r.URL.Path, r.URL.Query())
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+		})
+		err := runRecipeCmd(t, env, "3263843", "--source", "community", "--json")
+		var ue *api.UnauthorizedError
+		if !errors.As(err, &ue) {
+			t.Fatalf("expected UnauthorizedError, got %v", err)
+		}
+		if reqs.count() != 1 {
+			t.Errorf("401 must be one non-retried request, got %d", reqs.count())
+		}
+		if got := exitCodeFor(err, false); got != 1 {
+			t.Errorf("anonymous 401 must map to exit 1, got %d", got)
+		}
+		if got := exitCodeFor(err, true); got != 4 {
+			t.Errorf("rejected token must map to exit 4, got %d", got)
+		}
+		if env.buf.Len() != 0 {
+			t.Errorf("failed community list must keep stdout clean")
+		}
+	})
+
+	t.Run("malformed body", func(t *testing.T) {
+		reqs := &recipeRequests{}
+		env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+			reqs.record(r.URL.Path, r.URL.Query())
+			w.Write([]byte(`not json`))
+		})
+		err := runRecipeCmd(t, env, "3263843", "--source", "community", "--json")
+		if err == nil {
+			t.Fatal("malformed community body must be an error, not empty success")
+		}
+		if reqs.count() != 1 {
+			t.Errorf("malformed body must stay one request, got %d", reqs.count())
+		}
+		if got := exitCodeFor(err, false); got != 1 {
+			t.Errorf("decode failure must map to exit 1, got %d", got)
+		}
+		if env.buf.Len() != 0 {
+			t.Errorf("decode failure must keep stdout clean, got %q", env.buf.String())
+		}
+	})
+}
