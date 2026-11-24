@@ -1,14 +1,28 @@
 # civitai-cli (`civ`)
 
-A zero-dependency, single-file command-line tool for **finding** and **vetting**
-[Civitai](https://civitai.com) models from the terminal.
+[![Release](https://img.shields.io/github/v/release/BaixuanZhu/civitai-cli)](https://github.com/BaixuanZhu/civitai-cli/releases/latest)
+[![CI](https://github.com/BaixuanZhu/civitai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/BaixuanZhu/civitai-cli/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/BaixuanZhu/civitai-cli)](https://github.com/BaixuanZhu/civitai-cli/blob/main/go.mod)
+[![License: MIT](https://img.shields.io/github/license/BaixuanZhu/civitai-cli)](LICENSE)
+[![Platform: Windows amd64/arm64](https://img.shields.io/badge/platform-Windows%20amd64%20%7C%20arm64-blue)](#install)
+
+A zero-dependency, single-file command-line tool for **finding**, **understanding**,
+and **vetting** [Civitai](https://civitai.com) models from the terminal.
 
 - **Find a model** — search and filter the registry (`civ search`), inspect a
-  model and its versions (`civ show`), complete tag names (`civ tags`).
+  model and its versions (`civ show`), complete tag names (`civ tags`), and
+  diff two models or versions field by field (`civ compare`).
+- **Understand how it is used** — `civ recipe` returns trigger words,
+  provenance, and prompt-free example summaries in one bounded call; select
+  one example to get its exact prompt / negativePrompt / sampler settings.
 - **Vet a model** — reverse-look-up a local file (or a SHA256 / AutoV2 hash)
   against the registry (`civ vet`) to answer "who made this, what base model,
   what trigger words, is it safe, what license, how do others prompt it", and
   batch-audit a whole directory (`civ sync`).
+- **Check a local set** — `civ resolve` reports whether an explicitly declared
+  set of local checkpoint/LoRA files is ready to run (exact hashes, one
+  checkpoint anchor, compatible dependents): exit `0` ready, `5` completed
+  not ready.
 
 It is **anonymous by default** (the entire read surface needs no token), written
 in pure Go standard library (no third-party modules), and ships as one static
@@ -27,6 +41,12 @@ gating.
 # Find models: search the registry (anonymous, no token needed)
 civ search anima --limit 5
 
+# Understand a version: trigger words + prompt-free example summaries
+civ recipe 3263843 --json
+
+# One example's full prompt text (1-based sourceIndex from the summary)
+civ recipe 3263843 --example 1 --json
+
 # Vet a model: reverse-look-up a local file against the Civitai registry
 civ vet ./models/loras/your-model.safetensors
 ```
@@ -42,27 +62,43 @@ model):
 civ vet FBA1195327        # AutoV2 (first 10 hex chars of the SHA256)
 ```
 
-Add `--json` to any command for machine-readable output:
+Add `--json` to any command for machine-readable output. `search`, `show`, and
+`recipe` default to compact, versioned envelopes; `search`/`show` take
+`--view full` to restore the pre-0.5 legacy shape:
 
 ```bash
-civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.load(sys.stdin)))"
+civ search anima --limit 5 --json | python -c "import json,sys; print(len(json.load(sys.stdin)['items']))"
 ```
 
 ---
 
 ## Features
 
-- **Core commands** — `search`, `show`, `vet`, `sync`, `tags`, `login`/`logout`,
-  `proxy`, and `skill` — plus `upgrade`, `completion`, `version`, and `help`.
+- **Grouped commands** — discover (`search`, `show`, `compare`, `tags`),
+  recipes (`recipe`), local models (`vet`, `sync`, `resolve`), and utilities
+  (`login`/`logout`, `proxy`, `skill`, `upgrade`, `completion`, `version`,
+  `help`); `civ help` groups them the same way.
 - **Vetting flagship** — `vet` accepts a file path, a 64-char SHA256, or a
   10-char AutoV2; `sync` batch-audits a directory with a size/mtime hash cache,
   duplicate detection, and CSV/JSON/table output.
-- **Example-image recipes** — `--prompts` on `show -v` and `vet` prints
-  copyable prompt / negativePrompt / steps / cfgScale / sampler / scheduler
-  blocks (and counts images whose meta is null).
+- **Recipe context** — `civ recipe` returns a prompt-free summary (trigger
+  words, provenance, selection counts, bounded example summaries) and one
+  example's exact prompt text on demand (`--example <sourceIndex>`); the
+  community source takes one bounded `/images` sample, and
+  `recipe image <imageId>` returns one exact image detail.
+- **Compact versioned JSON** — `--json` emits small envelopes
+  (`civ.search/v1`, `civ.show/v1`, `civ.recipe/v1`; `schemaVersion: 1` for
+  resolve and compare), while `--view full` on `search`/`show` reproduces the
+  pre-0.5 output byte-for-byte.
+- **Local readiness** — `civ resolve` evaluates only the refs you pass (local
+  path, full SHA256, versioned AIR, `version:<id>`) with exact-hash matching
+  and no downloads.
+- **Comparison** — `civ compare models|versions` diffs 2–5 exact IDs with
+  all-or-nothing fetches; `--diff` hides fields confirmed equal.
 - **Bundled Agent Skill** — `civ skill install` ships the embedded `civ-prompt`
   skill to claude / zcode / codex, teaching coding agents to build text-to-image
-  prompts from real Civitai trigger words and example-image recipes.
+  prompts from real Civitai trigger words and example-image recipes via
+  `civ recipe`.
 - **Self-update** — `civ upgrade` pulls the latest GitHub Release, verifies
   SHA256 against `checksums.txt`, and swaps the binary via a same-volume `.bak`
   rename with rollback.
@@ -270,7 +306,7 @@ text appears only when you explicitly select one example.
 ```bash
 civ recipe 3263843                    # official summary, 3 example summaries
 civ recipe 3263843 --examples 0       # selection counts only, examples: []
-civ recipe 3263843 --example 0        # singular detail: that example's prompt text
+civ recipe 3263843 --example 1        # singular detail: that example's prompt text
 civ recipe 3263843 --source community --limit 10
 civ recipe 3263843 --source community --sort newest --json
 civ recipe image 123456 --json        # one exact community image detail
@@ -298,7 +334,9 @@ that image's selected detail; it never reuses list state or fetches other
 images.
 
 JSON schemas are versioned as `civ.recipe/v1` (`kind: "recipeSummary"` or
-`"recipeExampleDetail"`). Known numeric fields share one normalizer: numeric
+`"recipeExampleDetail"` for the official source; `"communityRecipeSample"` or
+`"communityImageDetail"` for the community views). Known numeric fields share
+one normalizer: numeric
 `20` and string `"20"` become the same JSON number, LoRA weights normalize the
 same way, seeds stay exact decimal strings, and missing/null stays null while
 invalid/non-scalar shapes become null plus a structured issue. Empty or
@@ -339,8 +377,9 @@ and can never make a set ready. No model bytes are downloaded.
 
 Exit codes are part of the contract: `0` ready, `5` completed **not ready**
 (the report still prints on stdout), `1` usage/local I/O/decode, `2` network,
-`4` rejected token. `--json` emits the versioned `resolver-v1` report with
-`ready`, `summary`, per-resource results, evidence, and findings.
+`4` rejected token. `--json` emits the versioned report (`schemaVersion: 1`,
+`policyVersion: "resolver-v1"`) with `ready`, `summary`, per-resource results,
+evidence, and findings.
 
 ### `civ compare models|versions <id>...` — field-by-field diff
 
@@ -539,10 +578,12 @@ civ skill install --platform codex --json  # machine-readable [{platform,path,ac
 [Agent Skills](https://agentskills.io) skill that teaches a coding agent to craft
 text-to-image prompts from real Civitai data: the trigger words (`trainedWords`)
 that activate a LoRA, plus example-image recipes (prompt / negativePrompt / steps /
-cfgScale / sampler / scheduler) gathered via `civ vet/show/search --prompts --json`.
-The skill tree is embedded in the binary (`go:embed`), so any installed `civ` can
-install it without the repository source on disk. This is a purely local file
-operation — no network.
+cfgScale / sampler / scheduler) read through `civ recipe` (a prompt-free summary,
+then one explicitly selected example's detail; `civ vet/show --prompts --json`
+remains the legacy path). The skill works from the compact `--json` envelopes by
+default. The skill tree is embedded in the binary (`go:embed`), so any installed
+`civ` can install it without the repository source on disk. This is a purely
+local file operation — no network.
 
 | Flag | Default | Description |
 |---|---|---|
