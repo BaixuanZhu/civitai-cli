@@ -144,6 +144,9 @@ func TestAllHelpPages_SectionOrder(t *testing.T) {
 	}{
 		{"search", searchHelp, true},
 		{"show", showHelp, true},
+		{"recipe", recipeHelp, true},
+		{"resolve", resolveHelp, false},
+		{"compare", compareHelp, true},
 		{"vet", vetHelp, true},
 		{"sync", syncHelp, true},
 		{"tags", tagsHelp, true},
@@ -239,7 +242,7 @@ func TestWriteHelpPage_CoversAllCommands(t *testing.T) {
 // no less (a page added without joining the map would be unreachable via
 // `civ help <name>`) and no more (upgrade stays out; main special-cases it).
 func TestHelpPages_MapMatchesExpectedCommands(t *testing.T) {
-	want := []string{"completion", "login", "logout", "proxy", "search", "show", "skill", "sync", "tags", "vet"}
+	want := []string{"compare", "completion", "login", "logout", "proxy", "recipe", "resolve", "search", "show", "skill", "sync", "tags", "vet"}
 	got := slices.Sorted(maps.Keys(helpPages))
 	if !slices.Equal(got, want) {
 		t.Errorf("helpPages keys = %v, want exactly %v", got, want)

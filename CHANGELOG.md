@@ -9,6 +9,44 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [0.5.0] - 2026-11-24
+
+### Added
+
+- `civ recipe <versionId>`: compact, read-only generation context for a
+  model version — prompt-free summary by default (3 example summaries,
+  `--examples 0-10`), singular explicit detail via `--example <sourceIndex>`,
+  and an optional bounded community source (`--source community`,
+  `--limit 1-100`, `--sort most-reactions|newest`). `civ recipe image
+  <imageId>` returns one exact community image detail. JSON is versioned as
+  `civ.recipe/v1`; official and community projections share one scalar
+  normalizer (numeric strings become numbers, seeds stay exact decimal
+  strings, invalid shapes become null plus a structured issue). No list or
+  summary contains prompts, description HTML, raw metadata, or
+  ComfyUI/workflow payloads.
+- `civ resolve <ref>...`: read-only readiness evaluation for an explicitly
+  declared resource set, accepting local paths, full SHA256, versioned AIR,
+  and `version:<id>` only. Reports `READY`/`NOT READY` with evidence and
+  findings; unknown compatibility blocks readiness. Adds exit code `5` for a
+  completed not-ready result (report on stdout). No downloads, scanning,
+  caching, or library writes.
+- `civ compare models|versions <id>...`: field-by-field comparison of 2–5
+  unique exact IDs with the first subject as baseline, `--diff` to hide
+  confirmed-equal fields, and stable schema-1 JSON. Includes exact
+  file-pairing (ID → SHA256 → name/type), trigger/resource/recipe deltas, and
+  explicit missing/null/empty states; no prompts, descriptions, raw image
+  payloads, scores, or recommendations.
+
+### Changed
+
+- **Breaking (pre-1.0):** `civ search --json` and `civ show --json` now
+  default to compact, versioned envelopes (`civ.search/v1`,
+  `civ.show/v1`) that retain selection identifiers, all versions/files/
+  hashes/scans, and drop description/prompt/raw-metadata blobs. The legacy
+  shapes are available with `--view full`; `--view` requires `--json` and
+  `show --view` conflicts with `--prompts`. Human tables and the
+  `show -v --prompts --json` compatibility view are unchanged.
+
 ## [0.4.0] - 2026-11-23
 
 ### Added

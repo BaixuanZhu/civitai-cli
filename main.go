@@ -50,6 +50,12 @@ func main() {
 		cmd.Search(os.Args[2:])
 	case "show":
 		cmd.Show(os.Args[2:])
+	case "recipe":
+		cmd.Recipe(os.Args[2:])
+	case "resolve":
+		cmd.Resolve(os.Args[2:])
+	case "compare":
+		cmd.Compare(os.Args[2:])
 	case "vet":
 		cmd.Vet(os.Args[2:])
 	case "sync":
@@ -139,19 +145,29 @@ Usage:
   civ <command> [flags]
 
 Commands:
-  search <query>   Search models (--type --base --sort --period --tag --user --limit)
-  show <modelId>   Show model header and version table (-v <versionId> drills in; --prompts for recipes)
-  vet <path|hash>  Audit a local file (or SHA256/AutoV2 hash) against the Civitai registry (--prompts)
-  sync <dir>       Batch-audit a directory (--ext --format table|csv|json --concurrency --rehash)
-  tags <query>     Tag name completion (--limit)
-  login [key]      Save an API token: --key/-t <key>, one positional <key>, --token, or a stdin prompt
-  logout           Remove the saved API token
-  proxy <action>   Save/show/clear the outbound proxy (set/get/unset; bare = status)
-  skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
-  upgrade          Self-update from the latest GitHub Release ([--proxy <url>])
-  completion <shell>  Print a shell completion script (bash, zsh, fish, powershell)
-  version          Print the civ version
-  help             Print this help
+  Discover:
+    search <query>   Search models (--type --base --sort --period --tag --user --limit)
+    show <modelId>   Show model header and version table (-v <versionId> drills in; --prompts for recipes)
+    compare models|versions <id>...  Compare model or version facts (--diff)
+    tags <query>     Tag name completion (--limit)
+
+  Recipes:
+    recipe <versionId>  Compact official/community recipe context (--source --examples --example --sort --limit; "recipe image <imageId>" for one community image detail)
+
+  Local models:
+    vet <path|hash>  Audit a local file (or SHA256/AutoV2 hash) against the Civitai registry (--prompts)
+    sync <dir>       Batch-audit a directory (--ext --format table|csv|json --concurrency --rehash)
+    resolve <ref>... Evaluate a resource set's local readiness (path, full SHA256, versioned AIR, version:<id>)
+
+  Utilities:
+    login [key]      Save an API token: --key/-t <key>, one positional <key>, --token, or a stdin prompt
+    logout           Remove the saved API token
+    proxy <action>   Save/show/clear the outbound proxy (set/get/unset; bare = status)
+    skill <action>   Install/remove/update the civ-prompt skill (claude/zcode/codex; interactive or --platform)
+    upgrade          Self-update from the latest GitHub Release ([--proxy <url>])
+    completion <shell>  Print a shell completion script (bash, zsh, fish, powershell)
+    version          Print the civ version
+    help             Print this help
 
 Run "civ <command> help" or "civ help <command>" (or civ <command> -h) for flags and examples.
 
@@ -184,6 +200,6 @@ Environment:
   CIV_NO_BOOTSTRAP Non-empty disables the startup PATH registration
 
 Exit codes:
-  0 success   1 usage error   2 network failure   3 hash not registered (vet)   4 token rejected
+  0 success   1 usage error   2 network failure   3 hash not registered (vet)   4 token rejected   5 not ready (resolve)
 `)
 }

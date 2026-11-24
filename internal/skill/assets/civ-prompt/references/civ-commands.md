@@ -15,10 +15,11 @@ civ search <query> [--type lora] [--base "Flux.1 D"] [--sort most-downloaded] \
 - `--type` is repeatable or comma-separated (`lora`, `checkpoint`, `ti`, `locon`, ...).
 - `--base` applies only the first value; quote values containing spaces.
 - `--limit` is 1-100.
-- `--json` passes through the raw API `items` array unchanged. Each item carries
-  `id`, `name`, `type`, `nsfw`, `tags`, `baseModels`, `stats`, `creator`, and
-  `modelVersions[]` (each with `id`, `name`, `baseModel`, and sometimes `trainedWords`).
-- Use the chosen item's `id` (modelId) and a `modelVersions[].id` (versionId) with `show`.
+- `--json` defaults to the compact `civ.search/v1` envelope (`items[]` of model
+  summaries with `id`, `name`, `type`, base model, stats, and every
+  `modelVersions[].id`). `--view full` restores the legacy raw items array.
+- Use the chosen item's `id` (modelId) and a `modelVersions[].id` (versionId) with
+  `recipe` (preferred) or `show`.
 
 ## show — inspect a model or version
 
@@ -31,11 +32,44 @@ civ show <modelId> -v <versionId> --prompts --json
 ```
 
 - `--prompts` requires `-v <versionId>`.
-- `--json` without `-v`: the full model object (`modelVersions[]` embedded).
-- `--json` with `-v` (no `--prompts`): the full version object, including
-  `trainedWords`, `baseModel`, `files[]`, `images[]` (each `images[].meta` may be null),
-  `model` summary, and `stats`.
-- `--json` with `-v --prompts`: the recipe view (see below).
+- `--json` defaults to compact `civ.show/v1` envelopes (`modelSummary` without
+  `-v`, `versionSummary` with `-v`): identity, triggers, files/hashes/scans, and
+  example counts, with no prompt/description/raw-metadata blobs.
+- `--view full` restores the legacy decoded payload (full model object,
+  version object including `images[].meta`, or the `--prompts` recipe view).
+- `--view` requires `--json` and conflicts with `--prompts`.
+
+## recipe — compact generation context (preferred for prompt data)
+
+```bash
+civ recipe <versionId> --json                 # prompt-free summary, 3 examples
+civ recipe <versionId> --examples 0 --json    # counts only, examples: []
+civ recipe <versionId> --example <sourceIndex> --json   # one example's prompt text
+civ recipe <versionId> --source community [--limit 20] [--sort most-reactions] --json
+civ recipe image <imageId> --json             # one exact community image detail
+```
+
+- Summary shape (`kind: "recipeSummary"`, `schemaVersion: "civ.recipe/v1"`):
+  `subject` (`model`, `version`, `trainedWords`), `provenance`,
+  `selection {requested, returned, total, withMetadata, withoutMetadata, truncated}`,
+  `examples[]` (`sourceIndex`, `metadataStatus`, `promptStatus`,
+  `negativePromptStatus`, `parameters`), and `issues[]`. Summaries contain **no**
+  prompt or negativePrompt text, at any count including 1.
+- Detail shape (`kind: "recipeExampleDetail"`): a singular `example` with the
+  same summary fields plus `textParameters {prompt, negativePrompt}` for the
+  selected `sourceIndex` only.
+- `parameters` covers steps, cfgScale, sampler, scheduler, seed (exact decimal
+  string), width, height, and denoise. Numeric strings normalize to numbers;
+  invalid/non-scalar values become null plus an issue.
+- `--examples` defaults to 3 (range 0-10). `--example` is the 1-based
+  `sourceIndex` shown in the summary and is mutually exclusive with an explicit
+  `--examples`.
+- Community mode performs exactly one bounded `/images` sample
+  (`modelVersionId`, `withMeta=true`, `type=image`, `limit`, `sort`,
+  `period=AllTime`) and reports per-image observations only. Continuation is
+  reported but never followed. No aggregation, ranking, or recommendation.
+- `civ recipe image` performs exactly one `imageId`+`withMeta=true`+
+  `type=image`+`limit=1` request and returns only that image's detail.
 
 ## vet — audit a local file or hash
 
@@ -107,3 +141,4 @@ civ tags <query> [--limit 20] [--json]
 | 2 | Network failure (transport error, 429, or 5xx after retries). |
 | 3 | Hash not registered — vet only. |
 | 4 | Token rejected (401 with a token present). |
+| 5 | Completed but not ready — resolve only (not used by prompt commands). |

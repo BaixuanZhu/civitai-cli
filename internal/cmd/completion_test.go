@@ -57,14 +57,16 @@ func mainDispatchWords(t *testing.T) []string {
 // drift-guard input (prd R5). Commands absent here (logout, upgrade,
 // completion, version, help) must carry no flags in the spec.
 var completionRegisterFuncs = map[string]func(*flag.FlagSet){
-	"search": func(fs *flag.FlagSet) { var o searchOptions; o.register(fs) },
-	"show":   func(fs *flag.FlagSet) { var o showOptions; o.register(fs) },
-	"vet":    func(fs *flag.FlagSet) { var o vetOptions; o.register(fs) },
-	"sync":   func(fs *flag.FlagSet) { var o syncOptions; o.register(fs) },
-	"tags":   func(fs *flag.FlagSet) { var o tagsOptions; o.register(fs) },
-	"login":  func(fs *flag.FlagSet) { var o loginOptions; o.register(fs) },
-	"proxy":  func(fs *flag.FlagSet) { var o proxyOptions; o.register(fs) },
-	"skill":  func(fs *flag.FlagSet) { var o skillOptions; o.register(fs) },
+	"search":  func(fs *flag.FlagSet) { var o searchOptions; o.register(fs) },
+	"show":    func(fs *flag.FlagSet) { var o showOptions; o.register(fs) },
+	"recipe":  func(fs *flag.FlagSet) { var o recipeOptions; o.register(fs) },
+	"compare": func(fs *flag.FlagSet) { var o compareOptions; o.register(fs) },
+	"vet":     func(fs *flag.FlagSet) { var o vetOptions; o.register(fs) },
+	"sync":    func(fs *flag.FlagSet) { var o syncOptions; o.register(fs) },
+	"tags":    func(fs *flag.FlagSet) { var o tagsOptions; o.register(fs) },
+	"login":   func(fs *flag.FlagSet) { var o loginOptions; o.register(fs) },
+	"proxy":   func(fs *flag.FlagSet) { var o proxyOptions; o.register(fs) },
+	"skill":   func(fs *flag.FlagSet) { var o skillOptions; o.register(fs) },
 }
 
 // completionSpecFlags returns the spec's flag set for name, failing the

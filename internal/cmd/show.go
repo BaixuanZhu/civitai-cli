@@ -49,6 +49,9 @@ Options:
   --prompts        With -v, append example-image generation recipes
                    (prompt, negative prompt, steps, cfgScale, sampler,
                    scheduler); requires -v <versionId>
+  --view <v>       JSON detail level: compact or full (default compact);
+                   requires --json and conflicts with --prompts. "full"
+                   restores the pre-0.5 decoded payload
 
 Examples:
   civ show 182296

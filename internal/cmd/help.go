@@ -25,6 +25,9 @@ const globalHelpBlock = `Global flags (accepted after the command name):
 var helpPages = map[string]string{
 	"search":     searchHelp,
 	"show":       showHelp,
+	"recipe":     recipeHelp,
+	"resolve":    resolveHelp,
+	"compare":    compareHelp,
 	"vet":        vetHelp,
 	"sync":       syncHelp,
 	"tags":       tagsHelp,

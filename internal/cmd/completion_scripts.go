@@ -39,7 +39,7 @@ _civ() {
 
     # Command names complete only in position 1; flags never do.
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=( $(compgen -W "search show vet sync tags login logout proxy skill upgrade completion version help" -- "$cur") )
+        COMPREPLY=( $(compgen -W "search show recipe resolve compare vet sync tags login logout proxy skill upgrade completion version help" -- "$cur") )
         return 0
     fi
 
@@ -52,7 +52,19 @@ _civ() {
     # Enum values after a flag and a space.
     case "$prev" in
         --sort)
-            COMPREPLY=( $(compgen -W "hot highest-rated most-downloaded most-liked most-discussed most-collected most-images newest oldest recently-added" -- "$cur") )
+            if [ "$cmd" = "recipe" ]; then
+                COMPREPLY=( $(compgen -W "most-reactions newest" -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -W "hot highest-rated most-downloaded most-liked most-discussed most-collected most-images newest oldest recently-added" -- "$cur") )
+            fi
+            return 0
+            ;;
+        --view)
+            COMPREPLY=( $(compgen -W "compact full" -- "$cur") )
+            return 0
+            ;;
+        --source)
+            COMPREPLY=( $(compgen -W "official community" -- "$cur") )
             return 0
             ;;
         --period)
@@ -76,7 +88,7 @@ _civ() {
             return 0
             ;;
         # Free-form flag values (incl. the global value flags): no candidates.
-        --base|--tag|--user|--limit|-v|--ver|--ext|--concurrency|--key|-t|--token|--proxy|--timeout)
+        --base|--tag|--user|--limit|--examples|--example|-v|--ver|--ext|--concurrency|--key|-t|--token|--proxy|--timeout)
             return 0
             ;;
     esac
@@ -89,6 +101,8 @@ _civ() {
         --format=*)   COMPREPLY=( $(compgen -W "table csv json" -- "${cur#--format=}") ); return 0 ;;
         --scope=*)    COMPREPLY=( $(compgen -W "user project" -- "${cur#--scope=}") ); return 0 ;;
         --platform=*) COMPREPLY=( $(compgen -W "claude zcode codex all" -- "${cur#--platform=}") ); return 0 ;;
+        --view=*)     COMPREPLY=( $(compgen -W "compact full" -- "${cur#--view=}") ); return 0 ;;
+        --source=*)   COMPREPLY=( $(compgen -W "official community" -- "${cur#--source=}") ); return 0 ;;
     esac
 
     # Action words for the action-style commands.
@@ -109,8 +123,11 @@ _civ() {
     # Per-command flags plus the five global flags (unreachable in
     # position 1 by construction, matching the CLI's accepted position).
     case "$cmd" in
-        search)     COMPREPLY=( $(compgen -W "--type --base --sort --period --tag --user --limit --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
-        show)       COMPREPLY=( $(compgen -W "-v --ver --prompts --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        search)     COMPREPLY=( $(compgen -W "--type --base --sort --period --tag --user --limit --view --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        show)       COMPREPLY=( $(compgen -W "-v --ver --prompts --view --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        recipe)     COMPREPLY=( $(compgen -W "--examples --example --source --sort --limit --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        resolve)    COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        compare)    COMPREPLY=( $(compgen -W "--diff --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         vet)        COMPREPLY=( $(compgen -W "--prompts --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         sync)       COMPREPLY=( $(compgen -W "--ext --format --concurrency --rehash --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         tags)       COMPREPLY=( $(compgen -W "--limit --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
@@ -164,6 +181,9 @@ _civ() {
             commands=(
                 'search:search Civitai models'
                 'show:show a model header and version table'
+                'recipe:show compact official/community recipe context'
+                'resolve:evaluate a resource set local readiness'
+                'compare:compare model or version facts'
                 'vet:audit a local file or hash against the registry'
                 'sync:batch-audit a directory of model files'
                 'tags:tag-name completion for prompt engineering'
@@ -189,6 +209,7 @@ _civ() {
                         '--tag[exact tag filter]:tag:' \
                         '--user[creator username]:user:' \
                         '--limit[max results]:count:' \
+                        '--view[json detail level]:view:(compact full)' \
                         "${global_specs[@]}"
                     ;;
                 show)
@@ -196,6 +217,21 @@ _civ() {
                         '(--ver)-v[drill into this version id]:version id:' \
                         '(-v)--ver[alias of -v]:version id:' \
                         '--prompts[append example-image recipes]' \
+                        '--view[json detail level]:view:(compact full)' \
+                        "${global_specs[@]}"
+                    ;;
+                recipe)
+                    _arguments \
+                        '--examples[summary example count]:count:' \
+                        '--example[selected example detail index]:source index:' \
+                        '--source[recipe source]:source:(official community)' \
+                        '--sort[community sample order]:order:(most-reactions newest)' \
+                        '--limit[community sample limit]:count:' \
+                        "${global_specs[@]}"
+                    ;;
+                compare)
+                    _arguments \
+                        '--diff[hide confirmed-equal fields]' \
                         "${global_specs[@]}"
                     ;;
                 vet)
@@ -265,7 +301,7 @@ _civ() {
                         _arguments "${global_specs[@]}"
                     fi
                     ;;
-                logout|upgrade|version|help)
+                resolve|logout|upgrade|version|help)
                     _arguments "${global_specs[@]}"
                     ;;
             esac
@@ -288,7 +324,7 @@ const fishCompletionScript = `# fish completion for the civ CLI (static script, 
 # Install persistently:      civ completion fish > ~/.config/fish/completions/civ.fish
 
 # Command names only while no subcommand is present yet (position 1).
-complete -c civ -n '__fish_use_subcommand' -a 'search show vet sync tags login logout proxy skill upgrade completion version help'
+complete -c civ -n '__fish_use_subcommand' -a 'search show recipe resolve compare vet sync tags login logout proxy skill upgrade completion version help'
 
 # civ search
 complete -c civ -n '__fish_seen_subcommand_from search' -l type -x -a 'checkpoint lora locon ti textualinversion hypernet hypernetwork dora controlnet upscaler motionmodule vae textencoder unet clipvision poses wildcards workflows comfyworkflows detection visionlanguage clip llm aestheticgradient other'
@@ -298,10 +334,22 @@ complete -c civ -n '__fish_seen_subcommand_from search' -l period -x -a 'day wee
 complete -c civ -n '__fish_seen_subcommand_from search' -l tag -x
 complete -c civ -n '__fish_seen_subcommand_from search' -l user -x
 complete -c civ -n '__fish_seen_subcommand_from search' -l limit -x
+complete -c civ -n '__fish_seen_subcommand_from search' -l view -x -a 'compact full'
 
 # civ show
 complete -c civ -n '__fish_seen_subcommand_from show' -s v -l ver -x -d 'Drill into this version id'
 complete -c civ -n '__fish_seen_subcommand_from show' -l prompts -d 'Append example-image recipes'
+complete -c civ -n '__fish_seen_subcommand_from show' -l view -x -a 'compact full'
+
+# civ recipe
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l examples -x -d 'Summary example count (0-10)'
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l example -x -d 'Selected example detail index'
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l source -x -a 'official community'
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l sort -x -a 'most-reactions newest'
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l limit -x -d 'Community sample limit (1-100)'
+
+# civ compare
+complete -c civ -n '__fish_seen_subcommand_from compare' -l diff -d 'Hide confirmed-equal fields'
 
 # civ vet
 complete -c civ -n '__fish_seen_subcommand_from vet' -l prompts -d 'Append example-image recipes'
@@ -336,7 +384,7 @@ complete -c civ -n '__fish_seen_subcommand_from completion' -n 'not __fish_seen_
 # Global flags: only after a command word, matching the CLI's parsing.
 # --token/--proxy/--timeout take free-form values (-x offers no candidates);
 # --json/--verbose are switches.
-set -l civ_global_condition '__fish_seen_subcommand_from search show vet sync tags login logout proxy skill upgrade completion version help'
+set -l civ_global_condition '__fish_seen_subcommand_from search show recipe resolve compare vet sync tags login logout proxy skill upgrade completion version help'
 complete -c civ -n "$civ_global_condition" -l json -d 'Machine-readable output'
 complete -c civ -n "$civ_global_condition" -l token -x -d 'API token'
 complete -c civ -n "$civ_global_condition" -l proxy -x -d 'Proxy URL for this invocation'
@@ -359,7 +407,7 @@ const powershellCompletionScript = `# powershell completion for the civ CLI (sta
 Register-ArgumentCompleter -Native -CommandName 'civ' -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('search', 'show', 'vet', 'sync', 'tags', 'login', 'logout', 'proxy', 'skill', 'upgrade', 'completion', 'version', 'help')
+    $commands = @('search', 'show', 'recipe', 'resolve', 'compare', 'vet', 'sync', 'tags', 'login', 'logout', 'proxy', 'skill', 'upgrade', 'completion', 'version', 'help')
     $globalFlags = @('--json', '--token', '--proxy', '--timeout', '--verbose')
 
     # Enumerable flags: flag name -> value candidates.
@@ -370,16 +418,21 @@ Register-ArgumentCompleter -Native -CommandName 'civ' -ScriptBlock {
         '--format'   = @('table', 'csv', 'json')
         '--scope'    = @('user', 'project')
         '--platform' = @('claude', 'zcode', 'codex', 'all')
+        '--view'     = @('compact', 'full')
+        '--source'   = @('official', 'community')
     }
 
     # Flags taking a free-form value (including the global value flags):
     # never completed.
-    $valueFlags = @('--base', '--tag', '--user', '--limit', '-v', '--ver', '--ext', '--concurrency', '--key', '-t', '--token', '--proxy', '--timeout')
+    $valueFlags = @('--base', '--tag', '--user', '--limit', '--examples', '--example', '-v', '--ver', '--ext', '--concurrency', '--key', '-t', '--token', '--proxy', '--timeout')
 
     # Per-command flags; the globals are appended after the command word.
     $commandFlags = @{
-        'search'     = @('--type', '--base', '--sort', '--period', '--tag', '--user', '--limit')
-        'show'       = @('-v', '--ver', '--prompts')
+        'search'     = @('--type', '--base', '--sort', '--period', '--tag', '--user', '--limit', '--view')
+        'show'       = @('-v', '--ver', '--prompts', '--view')
+        'recipe'     = @('--examples', '--example', '--source', '--sort', '--limit')
+        'resolve'    = @()
+        'compare'    = @('--diff')
         'vet'        = @('--prompts')
         'sync'       = @('--ext', '--format', '--concurrency', '--rehash')
         'tags'       = @('--limit')
@@ -425,6 +478,17 @@ Register-ArgumentCompleter -Native -CommandName 'civ' -ScriptBlock {
         $prev = $tokens[$tokens.Count - 1]
     }
     $afterCmd = $tokens.Count - 2
+
+    # Recipe's community sort uses its own vocabulary; handle it before the
+    # shared search-sort candidates.
+    if ($cmd -eq 'recipe' -and $prev -eq '--sort') {
+        foreach ($v in @('most-reactions', 'newest')) {
+            if ($v -like "$wordToComplete*") {
+                $results += [System.Management.Automation.CompletionResult]::new($v, $v, 'ParameterValue', $v)
+            }
+        }
+        return $results
+    }
 
     # Enum values after "--flag " (space form).
     if ($enumValues.ContainsKey($prev)) {

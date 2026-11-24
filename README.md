@@ -212,7 +212,8 @@ civ search stocking --type lora --limit 10
 civ search stocking --type lora --sort most-downloaded --limit 10
 civ search anime --base Illustrious --type lora --limit 5
 civ search "flux.1 d" --base "Flux.1 D" --period month --limit 20
-civ search anima --json                 # raw items array passthrough
+civ search anima --json                 # compact versioned envelope (default)
+civ search anima --json --view full     # legacy raw items array passthrough
 ```
 
 | Flag | Default | Description |
@@ -224,13 +225,17 @@ civ search anima --json                 # raw items array passthrough
 | `--tag` | none | Exact tag filter. |
 | `--user` | none | Creator username filter. |
 | `--limit` | `20` | Max results, **1–100** (the API hard-caps at 100). |
+| `--view <v>` | `compact` | `--json` detail level: `compact` (versioned `civ.search/v1` envelope of selection fields) or `full` (the pre-0.5 raw `items` array). Requires `--json`. |
 
 \* `recently-added` is a registered API enum but requires a `collectionId` on
 `/models`; plain model search returns HTTP 400 for it. The mapping is kept so
 the server's explanatory error reaches you.
 
 Human output is an aligned table (`ID NAME TYPE BASE DL RATIO UPDATED NSFW
-CREATOR`); `--json` passes through the raw API `items` array unchanged.
+CREATOR`). `--json` defaults to the compact `civ.search/v1` envelope
+(`schemaVersion`, `kind: "modelSearch"`, `items` with the selection fields and
+every version reference). `--view full` restores the legacy raw API `items`
+array byte-for-byte; see [API notes](#api-notes).
 
 ### `civ show <modelId>` — inspect a model
 
@@ -238,19 +243,125 @@ CREATOR`); `--json` passes through the raw API `items` array unchanged.
 civ show 2458426                      # model header + version table
 civ show 2458426 -v 3263843           # drill into a version: files, hashes, trigger words
 civ show 2458426 -v 3263843 --prompts # append example-image generation recipes
-civ show 2458426 --json               # full model object
+civ show 2458426 --json                # compact modelSummary envelope (default)
+civ show 2458426 --json --view full    # legacy decoded model object
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `-v`, `--ver <versionId>` | none | Drill into this version (files, full hashes, scan results, trigger words). |
 | `--prompts` | off | With `-v`, append example-image recipes (prompt / negativePrompt / steps / cfgScale / sampler / scheduler). Requires `-v`. |
+| `--view <v>` | `compact` | `--json` detail level: `compact` (`civ.show/v1` `modelSummary`/`versionSummary`, all versions/files/hashes/scans retained, prompts reduced to counts) or `full` (the legacy decoded payload). Requires `--json`; conflicts with `--prompts`. |
 
 The model header shows name, creator, type, tags, the four license grants
 (`allowNoCredit` / `allowCommercialUse` / `allowDerivatives` /
 `allowDifferentLicense`), stats, updated date, and the Civitai URL. Trigger
 words and prompt recipes are plain-text blocks (one per line, no quotes or
 bullets) so you can copy them straight into a registry.
+
+### `civ recipe <versionId>` — compact recipe context
+
+`recipe` answers "how is this version actually used?" in one read-only call.
+The summary is deliberately prompt-free: it carries model/version identity,
+trigger words, provenance, selection counts, and a bounded list of example
+**summaries** (source index, text availability, small parameters). Full prompt
+text appears only when you explicitly select one example.
+
+```bash
+civ recipe 3263843                    # official summary, 3 example summaries
+civ recipe 3263843 --examples 0       # selection counts only, examples: []
+civ recipe 3263843 --example 0        # singular detail: that example's prompt text
+civ recipe 3263843 --source community --limit 10
+civ recipe 3263843 --source community --sort newest --json
+civ recipe image 123456 --json        # one exact community image detail
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--examples <n>` | `3` | Number of official example **summaries**, **0–10**. `0` returns version context and counts with `examples: []`; `1` is still a prompt-free summary. |
+| `--example <index>` | none | Singular detail for one official example by its `sourceIndex` (1-based, as shown in the summary). Returns only that example's prompt/negativePrompt. Mutually exclusive with an explicitly supplied `--examples`. |
+| `--source <s>` | `official` | `official` (one `GET /model-versions/{id}` request, never `/images`) or `community` (one bounded `GET /images` sample). Combining both is not supported. |
+| `--limit <n>` | `20` | Community sample size, **1–100**. Ignored by the official source. |
+| `--sort <s>` | `most-reactions` | Community order: `most-reactions` (fixed `period=AllTime`) or `newest` (case-insensitive; the API spelling `Most Reactions` is accepted). Rejected with the official source. |
+
+The community source performs exactly one bounded `GET /images` request
+(`modelVersionId`, `withMeta=true`, `type=image`, `limit`, `sort`,
+`period=AllTime`; no page/cursor/NSFW overrides) and returns per-image
+observations only (image/post/user provenance, original order, reactions,
+normalized parameters, resource stacks, and coverage counts) — no aggregation,
+frequency table, ranking, quality score, or recommendation. Coverage counts
+`returned`/`withMeta`/`usable` describe this one response; a continuation is
+reported but never followed, and an empty sample is a visibility outcome, not
+proof the version has no images. `civ recipe image <imageId>` performs exactly
+one `imageId`+`withMeta=true`+`type=image`+`limit=1` request and returns only
+that image's selected detail; it never reuses list state or fetches other
+images.
+
+JSON schemas are versioned as `civ.recipe/v1` (`kind: "recipeSummary"` or
+`"recipeExampleDetail"`). Known numeric fields share one normalizer: numeric
+`20` and string `"20"` become the same JSON number, LoRA weights normalize the
+same way, seeds stay exact decimal strings, and missing/null stays null while
+invalid/non-scalar shapes become null plus a structured issue. Empty or
+missing metadata is never replaced with invented trigger words, sampler
+settings, or compatibility claims. Raw `meta`, ComfyUI/workflow payloads, and
+description HTML are not returned by recipe views.
+
+### `civ resolve <ref>...` — resource-set readiness
+
+`resolve` evaluates an explicitly declared set of local resources and reports
+whether **this invocation's set** is ready. It is not a scanner, downloader,
+or library: only the refs you pass are examined.
+
+```bash
+civ resolve ./models/checkpoint.safetensors ./models/lora.safetensors
+civ resolve version:3263843 --json
+civ resolve urn:air:anima:checkpoint:civitai:2458426@3263843
+civ resolve FBA11953276B57EDF59D1DC4F1857AC05AA079C56F982B4D7C20298D57D3F7EB --json
+```
+
+Accepted refs (no bare IDs, names, AutoV2/short hashes, or AIR without a
+version):
+
+| Form | Meaning |
+|---|---|
+| `<path>` | Explicit local regular file (path syntax required: separator, leading `.`/`~`, drive prefix, or a filename extension). |
+| `<sha256>` | Full 64-character SHA256 content reference. |
+| `<air>` | AIR URN with an exact `@<versionId>`. |
+| `version:<id>` | Exact positive model-version ID. |
+
+`READY` requires every ref to be an explicit, present local file whose SHA256
+matches exactly one visible registry file, exactly one Checkpoint anchor, and
+a reviewed compatible outcome for every dependent resource (LORA,
+TextualInversion, Controlnet, VAE). Missing base metadata and uncovered
+model-type tuples are **unknown** and block readiness; there are no aliases or
+name-only matches. Remote-only refs (hash, AIR, `version:<id>`) are diagnostic
+and can never make a set ready. No model bytes are downloaded.
+
+Exit codes are part of the contract: `0` ready, `5` completed **not ready**
+(the report still prints on stdout), `1` usage/local I/O/decode, `2` network,
+`4` rejected token. `--json` emits the versioned `resolver-v1` report with
+`ready`, `summary`, per-resource results, evidence, and findings.
+
+### `civ compare models|versions <id>...` — field-by-field diff
+
+```bash
+civ compare models 2458426 260267 --json
+civ compare versions 3108589 3263843 --json
+civ compare versions 3108589 3263843 --diff   # hide confirmed-equal fields
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--diff` | off | Hide fields confirmed equal across all subjects; keep changes and indeterminate states. Rejected together with `--json` (the JSON shape always carries every field). |
+
+Comparison takes **2–5 unique exact IDs** of one kind. The first subject is
+the baseline: derived trigger-word/resource/file changes are reported as
+baseline-to-each-later-subject, while field equality considers every subject.
+Fetches are strict and all-or-nothing (any selected 404/decode failure aborts
+before stdout); version comparison deduplicates parent-model fetches. Missing,
+null, and empty values stay distinct. Output never includes prompts,
+description HTML, image/download payloads, scores, ranks, or a "winner"; JSON
+is schema version `1` with `kind: "model"` or `"version"`.
 
 ### `civ vet <path|sha256|autov2>` — vet a model (flagship)
 
@@ -500,13 +611,15 @@ Per-command help: `civ <command> help` or `civ <command> -h` (see
 | `2` | Network failure: transport error, empty body, `429`, or `5xx` after retries were exhausted (or the context was canceled). |
 | `3` | Hash not registered — **`vet` only**. The by-hash lookup returned `404`; the file may not originate from Civitai or may have been modified. |
 | `4` | Token rejected (`401` with a token present). Re-check `--token` / `CIVITAI_API_KEY`, or run `civ login`. |
+| `5` | Completed but **not ready** — `resolve` only. The evaluation finished and the report is on stdout; this is a verdict, not an operational error. |
 
 Notes:
 
 - `sync` treats a per-file `404` as a `not_found` **data row** and keeps exit
   `0`; only a non-404 API failure (network/auth) changes the exit code.
 - `vet` maps `404` to `3`; every other command maps `404` to the usage class
-  (`1`).
+  (`1`). `resolve` reports an unregistered hash as an unresolved resource
+  inside a completed not-ready result (`5`).
 - An anonymous `401` (e.g. a personal-state filter without a token) is a usage
   error (`1`) with a hint to supply a token, not `4`.
 

@@ -114,6 +114,8 @@ Options:
   --tag <name>     Exact tag filter
   --user <name>    Creator username filter
   --limit <n>      Max results, 1-100 (default 20)
+  --view <v>       JSON detail level: compact or full (default compact);
+                   requires --json. "full" restores the pre-0.5 raw payload
 
 Examples:
   civ search stocking --type lora --limit 5

@@ -96,11 +96,24 @@ var completionSpec = []completionCommandSpec{
 		{"tag", nil},
 		{"user", nil},
 		{"limit", nil},
+		{"view", []string{"compact", "full"}},
 	}},
 	{"show", []completionFlagSpec{
 		{"v", nil},
 		{"ver", nil},
 		{"prompts", nil},
+		{"view", []string{"compact", "full"}},
+	}},
+	{"recipe", []completionFlagSpec{
+		{"examples", nil},
+		{"example", nil},
+		{"source", []string{"official", "community"}},
+		{"sort", []string{"most-reactions", "newest"}},
+		{"limit", nil},
+	}},
+	{"resolve", nil},
+	{"compare", []completionFlagSpec{
+		{"diff", nil},
 	}},
 	{"vet", []completionFlagSpec{
 		{"prompts", nil},

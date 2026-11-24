@@ -101,12 +101,30 @@ run_stdin() {
 
 # --- read surface (live anonymous) ---
 run version          version
-run search_json      search anima --json --limit 3
+run search_json      search anima --json --limit 3 --view full
+run search_compact   search anima --json --limit 3
 run search_table     search stocking --type lora --limit 5
-run search_filters   search girl --base Illustrious --sort most-downloaded --period all --type lora --json --limit 3
-run show_json        show 2458426 --json
-run show_version     show 2458426 -v 3263843 --json
+run search_filters   search girl --base Illustrious --sort most-downloaded --period all --type lora --json --limit 3 --view full
+run show_json        show 2458426 --json --view full
+run show_compact     show 2458426 --json
+run show_version     show 2458426 -v 3263843 --json --view full
+run show_version_compact show 2458426 -v 3263843 --json
 run show_prompts     show 2458426 -v 3263843 --prompts --json
+run recipe_summary   recipe 3263843 --json
+run recipe_detail    recipe 3263843 --example 1 --json
+run recipe_community recipe 3263843 --source community --limit 5 --json
+run recipe_community_newest recipe 3263843 --source community --sort newest --limit 5 --json
+run recipe_bad_id    recipe 0
+run recipe_bad_count recipe 3263843 --examples 11
+run recipe_select_conflict recipe 3263843 --examples 2 --example 0
+run recipe_image_bad recipe image 0
+run resolve_not_ready resolve 0000000000000000000000000000000000000000000000000000000000000000 --json
+run resolve_bad_ref  resolve DEADBEEF
+run compare_models   compare models 2458426 260267 --json
+run compare_versions compare versions 3108589 3263843 --json
+run compare_diff     compare versions 3108589 3263843 --diff
+run compare_few      compare models 2458426
+run compare_dupe     compare models 2458426 2458426
 run tags_json        tags anima --json --limit 5
 run vet_hit          vet "$ANIMA_SHA256" --json
 run vet_autov2       vet "$ANIMA_AUTOV2"
@@ -128,7 +146,7 @@ run search_timeout_bad  search anima --limit 1 --timeout 1ns
 # case below is search_help_me (the keyword is literal: "help me" is a real
 # query). upgrade's help tokens are routed by main (design D4) and asserted
 # here — distinct from the real self-update run that stays LAST.
-for c in search show vet sync tags login logout proxy skill upgrade completion; do
+for c in search show recipe resolve compare vet sync tags login logout proxy skill upgrade completion; do
   run "help_${c}_kw"   "$c" help
   run "help_${c}_flag" "$c" -h
 done
@@ -138,6 +156,9 @@ done
 # extra-word targets are usage errors (exit 1). All offline: no page renders
 # touch the network.
 run help_search_named  help search
+run help_recipe_named  help recipe
+run help_resolve_named help resolve
+run help_compare_named help compare
 run help_upgrade_named help upgrade
 run help_unknown       help nope
 run help_extra         help search extra
@@ -199,7 +220,10 @@ run proxy_unset_again  proxy unset
 run proxy_usage        proxy set
 run search_proxy_bad   search anima --limit 1 --proxy http://127.0.0.1:9
 # GitHub slot (task 11-23-github-proxy-slot): set/get/unset --github touch
-# only the githubProxy key; the civitai slot survives the scoped unset.
+# only the githubProxy key; the civitai slot survives the scoped unset. The
+# civitai slot was cleared by proxy_unset above, so restore it first — this
+# block needs a live civitai value to prove it survives `unset --github`.
+run proxy_set_again proxy set http://127.0.0.1:7890
 run proxy_set_gh    proxy set --github http://127.0.0.1:7891
 snap_cfg proxy_after_setgh
 run proxy_get_gh    proxy get
@@ -310,6 +334,31 @@ ver = json_of('show_version')
 check(exit_of('show_version') == 0 and ver is not None,
       'show -v --json: exit 0 and valid JSON version detail')
 
+# default compact contracts (task 11-24-search-show-compact, D1/D2): the
+# default --json shape is a versioned envelope; --view full above proves the
+# legacy shapes still work.
+sc = json_of('search_compact')
+check(exit_of('search_compact') == 0 and isinstance(sc, dict)
+      and sc.get('schemaVersion') == 'civ.search/v1' and sc.get('kind') == 'modelSearch'
+      and isinstance(sc.get('items'), list) and len(sc['items']) > 0
+      and all('id' in i and 'name' in i for i in sc['items'][:3]),
+      'search --json default compact: versioned envelope with model summaries')
+check(sc is not None and 'description' not in json.dumps(sc),
+      'search compact: no description blobs')
+
+sm = json_of('show_compact')
+check(exit_of('show_compact') == 0 and isinstance(sm, dict)
+      and sm.get('schemaVersion') == 'civ.show/v1' and sm.get('kind') == 'modelSummary'
+      and isinstance(sm.get('model'), dict),
+      'show --json default compact: modelSummary envelope')
+
+sv = json_of('show_version_compact')
+check(exit_of('show_version_compact') == 0 and isinstance(sv, dict)
+      and sv.get('kind') == 'versionSummary'
+      and isinstance(sv.get('version'), dict)
+      and isinstance(sv['version'].get('files'), list) and len(sv['version']['files']) > 0,
+      'show -v --json default compact: versionSummary with files')
+
 # show --prompts --json: recipe view with prompts array + skipped count
 sp = json_of('show_prompts')
 check(exit_of('show_prompts') == 0 and isinstance(sp, dict)
@@ -356,15 +405,103 @@ check(exit_of('sync_json') == 0 and isinstance(sj, list) and len(sj) > 0
       and all(r.get('status') == 'not_found' for r in sj),
       'sync --json: array of not_found rows')
 
+# recipe (task 11-24-recipe-context): prompt-free bounded summary, singular
+# explicit example detail, and pre-network usage errors.
+rs = json_of('recipe_summary')
+check(exit_of('recipe_summary') == 0 and isinstance(rs, dict)
+      and rs.get('schemaVersion') == 'civ.recipe/v1' and rs.get('kind') == 'recipeSummary'
+      and isinstance(rs.get('examples'), list) and 0 < len(rs['examples']) <= 3,
+      'recipe --json: recipeSummary with bounded examples')
+check(rs is not None and '"prompt"' not in out_of('recipe_summary')
+      and '"negativePrompt"' not in out_of('recipe_summary')
+      and 'description' not in json.dumps(rs),
+      'recipe summary: prompt/negativePrompt/description absent')
+
+rd = json_of('recipe_detail')
+check(exit_of('recipe_detail') == 0 and isinstance(rd, dict)
+      and rd.get('kind') == 'recipeExampleDetail'
+      and isinstance(rd.get('example'), dict)
+      and 'examples' not in rd,
+      'recipe --example 0 --json: singular recipeExampleDetail')
+check(isinstance(rd, dict)
+      and isinstance(rd.get('example', {}).get('textParameters'), dict),
+      'recipe detail: selected textParameters object present')
+
+# community source: one bounded sample, per-image observations only, and
+# large fields absent from the list shape.
+rc = json_of('recipe_community')
+check(exit_of('recipe_community') == 0 and isinstance(rc, dict)
+      and rc.get('schemaVersion') == 'civ.recipe/v1'
+      and rc.get('kind') == 'communityRecipeSample'
+      and isinstance(rc.get('observations'), list)
+      and isinstance(rc.get('coverage'), dict),
+      'recipe --source community: bounded communityRecipeSample')
+check(rc is not None and '"prompt"' not in out_of('recipe_community')
+      and '"negativePrompt"' not in out_of('recipe_community'),
+      'recipe community list: prompt/negativePrompt absent')
+rcn = json_of('recipe_community_newest')
+check(exit_of('recipe_community_newest') == 0 and isinstance(rcn, dict)
+      and rcn.get('kind') == 'communityRecipeSample'
+      and rcn.get('query', {}).get('sort') == 'Newest',
+      'recipe --source community --sort Newest: accepted and reported')
+
+check(exit_of('recipe_bad_id') == 1 and out_of('recipe_bad_id').strip() == '',
+      'recipe 0: exit 1, empty stdout')
+check(exit_of('recipe_image_bad') == 1 and out_of('recipe_image_bad').strip() == '',
+      'recipe image 0: exit 1, empty stdout')
+check(exit_of('recipe_bad_count') == 1 and out_of('recipe_bad_count').strip() == '',
+      'recipe --examples 11: exit 1, empty stdout')
+check(exit_of('recipe_select_conflict') == 1 and out_of('recipe_select_conflict').strip() == '',
+      'recipe --examples+--example: exit 1, empty stdout')
+
+# resolve (task 11-24-resource-resolver): a valid but unregistered full SHA
+# completes not-ready (exit 5) with the JSON report on stdout; a short hash is
+# a usage error before any lookup.
+rr = json_of('resolve_not_ready')
+check(exit_of('resolve_not_ready') == 5 and isinstance(rr, dict)
+      and rr.get('ready') is False,
+      'resolve unknown full SHA: exit 5, JSON not-ready report on stdout')
+check(exit_of('resolve_bad_ref') == 1 and out_of('resolve_bad_ref').strip() == '',
+      'resolve DEADBEEF: exit 1 (short hash is usage), empty stdout')
+
+# compare (task 11-24-model-version-compare): schema-1 model/version results,
+# human --diff, and usage errors before any request.
+cmm = json_of('compare_models')
+check(exit_of('compare_models') == 0 and isinstance(cmm, dict)
+      and cmm.get('schemaVersion') == 1 and cmm.get('kind') == 'model'
+      and len(cmm.get('subjects', [])) == 2,
+      'compare models --json: schema 1 model result with two subjects')
+cmv = json_of('compare_versions')
+check(exit_of('compare_versions') == 0 and isinstance(cmv, dict)
+      and cmv.get('kind') == 'version' and len(cmv.get('subjects', [])) == 2,
+      'compare versions --json: version result with two subjects')
+check(exit_of('compare_diff') == 0 and out_of('compare_diff').strip() != '',
+      'compare versions --diff: exit 0 with human diff output')
+check(exit_of('compare_few') == 1 and out_of('compare_few').strip() == '',
+      'compare with one subject: usage exit 1, empty stdout')
+check(exit_of('compare_dupe') == 1 and out_of('compare_dupe').strip() == '',
+      'compare with duplicate subjects: usage exit 1, empty stdout')
+
 # usage error: limit over 100 rejected CLI-side -> exit 1
 check(exit_of('usage_error') == 1,
       'search --limit 101: exit 1 (CLI-side cap)')
 
 # help / unknown command: usage surface (offline)
-check(exit_of('help_cmd') == 0 and 'Usage:' in out_of('help_cmd')
-      and 'proxy' in out_of('help_cmd')
-      and 'completion' in out_of('help_cmd'),
+h = out_of('help_cmd')
+check(exit_of('help_cmd') == 0 and 'Usage:' in h
+      and 'proxy' in h and 'completion' in h,
       'civ help: exit 0, usage printed, proxy and completion listed')
+heads = ['Discover:', 'Recipes:', 'Local models:', 'Utilities:']
+positions = [h.find(x) for x in heads]
+check(all(p >= 0 for p in positions) and positions == sorted(positions),
+      'civ help: grouped headings Discover < Recipes < Local models < Utilities')
+check(all(cmd in h for cmd in ('search', 'show', 'compare', 'tags', 'recipe',
+                               'vet', 'sync', 'resolve', 'login', 'logout',
+                               'proxy', 'skill', 'upgrade', 'completion',
+                               'version', 'help')),
+      'civ help: final command inventory present in the groups')
+check('unbootstrap' not in h,
+      'civ help: internal unbootstrap stays hidden')
 check('civ <command> help' in out_of('help_cmd'),
       'civ help: contains the "Run civ <command> help" pointer (AC6)')
 check(exit_of('unknown_cmd') == 1
@@ -378,6 +515,9 @@ check(exit_of('unknown_cmd') == 1
 help_sigs = {
     'search': [['--sort'], ['Examples:']],
     'show': [['--ver', '-v']],
+    'recipe': [['--examples'], ['Examples:']],
+    'resolve': [['version:<id>'], ['Exit codes:']],
+    'compare': [['--diff'], ['Examples:']],
     'vet': [['Exit codes:', '3']],
     'sync': [['--concurrency']],
     'tags': [['--limit']],
@@ -430,6 +570,10 @@ check(0 <= s.find('Usage:') < s.find('Options:') < s.find('Examples:')
 check(exit_of('help_search_named') == 0
       and out_of('help_search_named') == out_of('help_search_kw'),
       'civ help search: exit 0, byte-identical to `civ search help`')
+for cmd in ['recipe', 'resolve', 'compare']:
+    check(exit_of('help_%s_named' % cmd) == 0
+          and out_of('help_%s_named' % cmd) == out_of('help_%s_kw' % cmd),
+          'civ help %s: exit 0, byte-identical to `civ %s help`' % (cmd, cmd))
 check(exit_of('help_upgrade_named') == 0
       and out_of('help_upgrade_named') == out_of('help_upgrade_kw'),
       'civ help upgrade: exit 0, byte-identical to `civ upgrade help`')

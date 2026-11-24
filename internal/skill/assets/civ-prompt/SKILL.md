@@ -1,6 +1,6 @@
 ---
 name: civ-prompt
-description: Craft text-to-image prompts (文生图提示词) for Stable Diffusion, SDXL, Flux, Illustrious, and Anima using real Civitai data through the civ CLI. Use when writing or refining a prompt, choosing a LoRA or checkpoint, needing trigger words (触发词) to activate a LoRA, or reusing example-image recipes (prompt, negative prompt 负向提示词, steps, cfgScale, sampler, scheduler). Runs civ vet/show/search with --prompts --json to ground prompts in verified trigger words and generation recipes instead of guessing.
+description: Craft text-to-image prompts (文生图提示词) for Stable Diffusion, SDXL, Flux, Illustrious, and Anima using real Civitai data through the civ CLI. Use when writing or refining a prompt, choosing a LoRA or checkpoint, needing trigger words (触发词) to activate a LoRA, or reusing example-image recipes (prompt, negative prompt 负向提示词, steps, cfgScale, sampler, scheduler). Runs civ recipe/search/show/vet to ground prompts in verified trigger words and generation recipes instead of guessing.
 license: MIT
 metadata:
   version: "__CIV_VERSION__"
@@ -30,15 +30,20 @@ generate images. You assemble the prompt; the user's image tool renders it.
 ## Workflow
 
 1. Locate the model version. Pick the entry point that matches what you have:
-   - Local file (or hash): `civ vet <path> --prompts --json`
-   - Known model and version id: `civ show <modelId> -v <versionId> --prompts --json`
-   - A concept with no id yet: `civ search <concept> --type lora --json`, then run
-     `civ show <modelId> -v <versionId> --prompts --json` on the chosen hit.
+   - Local file (or hash): `civ vet <path> --json`, then use the reported
+     `version.id` with `civ recipe <versionId> --json`.
+   - Known model and version id: `civ recipe <versionId> --json` (one request,
+     prompt-free summary with trigger words, counts, and example summaries).
+   - A concept with no id yet: `civ search <concept> --type lora --json` (compact
+     envelope by default), then `civ recipe <versionId> --json` on the chosen hit.
 2. Extract the data from the JSON:
-   - Trigger words: `version.trainedWords` (full vet/show JSON) — the exact strings
-     that activate the LoRA.
-   - Recipes: the `prompts` array (with `--prompts --json`) — each entry carries
-     prompt, negativePrompt, steps, cfgScale, sampler, scheduler.
+   - Trigger words: `subject.trainedWords` — the exact strings that activate the LoRA.
+   - Example summaries: `examples[]` with `sourceIndex`, `parameters` (steps,
+     cfgScale, sampler, scheduler, seed, size, denoise), and text-availability
+     statuses. Summaries never contain prompt text, including a summary of one.
+   - Full prompt text: only after choosing a `sourceIndex`, run
+     `civ recipe <versionId> --example <sourceIndex> --json` and read
+     `example.textParameters.prompt` / `.negativePrompt`.
 3. Assemble the prompt:
    - Include every required trigger word verbatim, usually near the front.
    - Adopt a recipe's structure and parameters (steps, cfgScale, sampler,
@@ -58,6 +63,11 @@ generate images. You assemble the prompt; the user's image tool renders it.
   (`civ login`) only unlocks personal-state and gated NSFW queries.
 - `--json` is machine-readable; parse it rather than scraping the human table.
 - Images whose meta is null are skipped and counted (`skipped`); they carry no recipe.
+- `civ recipe` summaries are prompt-free by design. Do not expect or invent prompt
+  text from the summary; select one example explicitly for its text.
+- `civ search --json` and `civ show --json` default to compact envelopes; use
+  `--view full` only when you deliberately need a field the compact view omits.
+  `civ show -v --prompts --json` remains a legacy compatibility detail view.
 - `civ` does not download models or images and does not generate images.
 
 ## Resources
