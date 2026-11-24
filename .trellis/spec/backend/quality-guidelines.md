@@ -86,6 +86,16 @@ publishing.
     disabled cache.
   - `upgrade`: pure functions (`compareVersions`, `parseChecksum`,
     `replaceExeAt`, `cleanupBakAt`) + fake exes in a temp dir.
+- **Expected-failure coverage is mandatory** (convention, 2026-11-24): every
+  new command, flag, parser, or decoder ships table cases whose *expected
+  outcome is failure* — usage errors, zero/negative/overflow numbers,
+  wrong-case enums, empty/whitespace/unicode input, malformed JSON/root
+  shapes, and boundary values (0, max, max+1). Assert the exit class, empty
+  stdout on pre-render failures, and zero requests when validation precedes
+  network. A green suite means every failure path was exercised and
+  asserted, not that failures were omitted. Flag-parse-level failures
+  (non-integer/overflow flag values) belong in a direct `FlagSet`
+  parse test; run-level validation belongs in the `run*` table test.
 - **Fixtures**: `testdata/*.json` are verbatim live bodies; `testdata/FIXTURES.md`
   records fetch dates + source URLs (regenerate via plan appendix D). Re-fetch
   deliberately on drift and review field changes before editing `types.go`.
@@ -117,12 +127,14 @@ publishing.
 - [ ] No new `go.mod` require; `go list -m all` still only `civitai-cli`.
 - [ ] New endpoint goes through `Client.Get`; no direct `net/http` elsewhere.
 - [ ] All text English; exported symbols have `// Symbol ...` GoDoc.
-- [ ] New behavior has a table-driven / `httptest` test; unit tests stay offline.
+- [ ] New behavior has a table-driven / `httptest` test covering success **and
+      expected failures** (usage/range/case/malformed/boundary); unit tests
+      stay offline.
 - [ ] CLI surface changed (add/modify/remove command, flag, input form, output,
       exit code) → `scripts/integration-test.sh` updated in the same change.
 - [ ] Errors wrapped with `%w` + package prefix; classified with `errors.As`;
       degradation warns instead of failing.
-- [ ] Exit-code semantics preserved (0/1/2/3/4; `sync` not_found = data row).
+- [ ] Exit-code semantics preserved (0/1/2/3/4, resolve 5; `sync` not_found = data row).
 - [ ] stdout carries only results; logs/progress/warnings on stderr.
 - [ ] Reproducible-build flags / deterministic zip untouched; toolchain upgrade
       synced between `go.mod` and CI.
