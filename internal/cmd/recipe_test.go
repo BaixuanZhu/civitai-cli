@@ -8,30 +8,38 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 
 	"civitai-cli/internal/api"
+	"civitai-cli/internal/config"
 	"civitai-cli/internal/testutil"
 )
 
-// recipeVersionPath is the single endpoint every official recipe invocation
-// may request.
-const recipeVersionPath = "/model-versions/3263843"
+// recipeVersionPath is the single endpoint an official recipe invocation
+// may request; recipeImagesPath is the bounded community/detail endpoint.
+const (
+	recipeVersionPath = "/model-versions/3263843"
+	recipeImagesPath  = "/images"
+)
 
-// recipeRequests records every request path a recipe invocation made, so
-// tests can prove exactly-one-request behavior and the absence of model,
-// image, or community fallback calls.
+// recipeRequests records every request path and query a recipe invocation
+// made, so tests can prove exactly-one-request behavior, exact query
+// shapes, and the absence of model, media, or community fallback calls.
 type recipeRequests struct {
-	mu    sync.Mutex
-	paths []string
+	mu      sync.Mutex
+	paths   []string
+	queries []url.Values
 }
 
-func (r *recipeRequests) record(path string) {
+func (r *recipeRequests) record(path string, query url.Values) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.paths = append(r.paths, path)
+	r.queries = append(r.queries, query)
 }
 
 func (r *recipeRequests) count() int {
@@ -55,13 +63,32 @@ func (r *recipeRequests) pathList() []string {
 	return append([]string(nil), r.paths...)
 }
 
+func (r *recipeRequests) queryAt(i int) url.Values {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if i >= len(r.queries) {
+		return nil
+	}
+	return r.queries[i]
+}
+
+// hasImageRequest reports whether any recorded path targeted /images.
+func (r *recipeRequests) hasImageRequest() bool {
+	for _, path := range r.pathList() {
+		if path == recipeImagesPath {
+			return true
+		}
+	}
+	return false
+}
+
 // newRecipeTestEnv serves inline bodies first, then pinned fixtures by
 // path, and 404s everything else with the API's error shape.
 func newRecipeTestEnv(t *testing.T, routes, bodies map[string]string) (*testEnv, *recipeRequests) {
 	t.Helper()
 	reqs := &recipeRequests{}
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-		reqs.record(r.URL.Path)
+		reqs.record(r.URL.Path, r.URL.Query())
 		if body, ok := bodies[r.URL.Path]; ok {
 			w.Write([]byte(body))
 			return
@@ -478,6 +505,7 @@ func TestRecipe_MalformedSelectorValues(t *testing.T) {
 	for _, args := range [][]string{
 		{"3263843", "--examples", "abc"},
 		{"3263843", "--example", "abc"},
+		{"3263843", "--source", "community", "--limit", "abc"},
 		{"-5"}, // a leading-dash positional is flag syntax, rejected before network
 	} {
 		fs := flag.NewFlagSet("recipe", flag.ContinueOnError)
@@ -491,18 +519,24 @@ func TestRecipe_MalformedSelectorValues(t *testing.T) {
 }
 
 // TestRecipe_OptionsPresenceTracking pins the explicit-presence semantics
-// that let an explicit --examples 3 coexist with the default and make
-// --example 0 an invalid index rather than "absent".
+// that let an explicit --examples 3 coexist with the default, make
+// --example 0 an invalid index rather than "absent", and let the image
+// detail command reject any option that was explicitly supplied.
 func TestRecipe_OptionsPresenceTracking(t *testing.T) {
 	fs := flag.NewFlagSet("recipe", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var o recipeOptions
 	o.register(fs)
-	if fs.Lookup("examples") == nil || fs.Lookup("example") == nil {
-		t.Fatalf("recipe must register --examples and --example")
+	for _, name := range []string{"examples", "example", "source", "sort", "limit"} {
+		if fs.Lookup(name) == nil {
+			t.Fatalf("recipe must register --%s", name)
+		}
 	}
-	if o.examples.set || o.example.set {
-		t.Fatalf("defaults must not look explicitly supplied")
+	if o.examples.set || o.example.set || o.sort.set || o.limit.set || o.source.set {
+		t.Fatalf("defaults must not look explicitly supplied: %+v", o)
+	}
+	if o.source.value != recipeSourceOfficial {
+		t.Errorf("default source = %q, want %q", o.source.value, recipeSourceOfficial)
 	}
 	if err := fs.Parse(permuteArgs(fs, []string{"3263843", "--examples", "0"})); err != nil {
 		t.Fatalf("parse --examples 0: %v", err)
@@ -512,6 +546,20 @@ func TestRecipe_OptionsPresenceTracking(t *testing.T) {
 	}
 	if o.example.set {
 		t.Errorf("--example must stay absent")
+	}
+
+	fs2 := flag.NewFlagSet("recipe", flag.ContinueOnError)
+	fs2.SetOutput(io.Discard)
+	var community recipeOptions
+	community.register(fs2)
+	if err := fs2.Parse(permuteArgs(fs2,
+		[]string{"3263843", "--source", "community", "--sort", "newest", "--limit", "5"})); err != nil {
+		t.Fatalf("parse community options: %v", err)
+	}
+	if !community.source.set || community.source.value != recipeSourceCommunity ||
+		!community.sort.set || community.sort.value != "newest" ||
+		!community.limit.set || community.limit.value != 5 {
+		t.Errorf("community options not tracked: %+v", community)
 	}
 }
 
@@ -541,7 +589,7 @@ func TestRecipe_NotFoundAndUnauthorizedMapping(t *testing.T) {
 func TestRecipe_UnauthorizedMapping(t *testing.T) {
 	reqs := &recipeRequests{}
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-		reqs.record(r.URL.Path)
+		reqs.record(r.URL.Path, r.URL.Query())
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"unauthorized"}`))
 	})
@@ -720,6 +768,11 @@ func TestRecipe_HelpPage(t *testing.T) {
 	for _, sig := range []string{
 		"--examples <count>", "(0-10;", "default 3",
 		"--example <index>", "1-based source index",
+		"--source <source>", "official (default) or community",
+		"--sort <order>", "most-reactions (default) or",
+		"--limit <count>", "(1-100;", "default 20",
+		"civ recipe image <imageId>",
+		"one bounded GET /images response",
 	} {
 		if !strings.Contains(recipeHelp, sig) {
 			t.Errorf("recipe help missing signature %q", sig)
@@ -747,5 +800,491 @@ func TestRecipe_HelpPage(t *testing.T) {
 		if strings.Contains(strings.ToLower(recipeHelp), forbidden) {
 			t.Errorf("recipe help must not claim %q", forbidden)
 		}
+	}
+}
+
+// --- community source and image detail (task 11-24-community-recipes) ---
+
+// testCommunityItem builds one browse image carrying the provenance,
+// visibility, and reaction fields a community list row reports.
+func testCommunityItem(id int, meta string) string {
+	return fmt.Sprintf(`{"id":%d,"postId":%d,"username":"user%d","createdAt":"2026-01-02T03:04:05Z",`+
+		`"type":"image","baseModel":"SD 1.5","nsfwLevel":"Soft","browsingLevel":1,`+
+		`"stats":{"likeCount":3,"dislikeCount":0,"heartCount":1,"laughCount":0,"cryCount":0,"commentCount":2},`+
+		`"meta":%s}`, id, id*10, id, meta)
+}
+
+// testCommunityBody wraps raw item literals in the browse envelope.
+func testCommunityBody(items ...string) string {
+	return `{"items":[` + strings.Join(items, ",") + `],"metadata":{}}`
+}
+
+// testCommunityFixtureBody mixes prompt-bearing, null-meta, and
+// resource-bearing items so redaction and coverage are both observable.
+func testCommunityFixtureBody() string {
+	return testCommunityBody(
+		testCommunityItem(1001, `{"prompt":"sentinel-list-prompt","negativePrompt":"sentinel-list-negative","steps":"20","cfgScale":0,"seed":866354325141838}`),
+		`{"id":1002,"meta":null}`,
+		testCommunityItem(1003, `{"civitaiResources":[{"type":"checkpoint","modelVersionId":249861}],`+
+			`"resources":[{"type":"lora","name":"Legacy LoRA","weight":"0.65"}],`+
+			`"workflow":"sentinel-workflow","comfy":"sentinel-comfy"}`),
+	)
+}
+
+// testCommunityDetailBody serves exactly the one requested image detail.
+func testCommunityDetailBody(id int) string {
+	return fmt.Sprintf(`{"items":[{"id":%d,"postId":%d,"username":"user%d",`+
+		`"createdAt":"2026-01-02T03:04:05Z","type":"image","baseModel":"SD 1.5",`+
+		`"nsfwLevel":"Soft","browsingLevel":1,"modelVersionIds":[3263843],`+
+		`"stats":{"likeCount":3,"dislikeCount":0,"heartCount":1,"laughCount":0,"cryCount":0,"commentCount":2},`+
+		`"meta":{"prompt":"detail-prompt-%d","negativePrompt":"detail-negative-%d",`+
+		`"seed":866354325141838,"steps":"20","cfgScale":0,"clipSkip":2,"denoisingStrength":"0.35",`+
+		`"resources":[{"type":"lora","name":"Detail LoRA","weight":"0.65"}],`+
+		`"comfy":"sentinel-comfy","workflow":"sentinel-workflow"}}]}`, id, id*10, id, id, id)
+}
+
+// assertRecipeExactQuery fails unless the query carries exactly the wanted
+// keys/values and none of the forbidden ones.
+func assertRecipeExactQuery(t *testing.T, got url.Values, want map[string]string, forbidden ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("query has %d keys, want exactly %d: got %v", len(got), len(want), got)
+	}
+	for key, value := range want {
+		if got.Get(key) != value {
+			t.Errorf("param %s = %q, want %q", key, got.Get(key), value)
+		}
+	}
+	for _, key := range forbidden {
+		if got.Has(key) {
+			t.Errorf("forbidden query param %s present: %v", key, got)
+		}
+	}
+}
+
+// TestRecipe_OfficialNeverRequestsImages proves the compatibility
+// baseline: both the default and an explicit official source make exactly
+// one version request and no /images traffic.
+func TestRecipe_OfficialNeverRequestsImages(t *testing.T) {
+	for _, args := range [][]string{
+		{"3263843", "--json"},
+		{"3263843", "--source", "official", "--json"},
+		{"3263843", "--source", "official"},
+	} {
+		env, reqs := newRecipeFixtureEnv(t)
+		if err := runRecipeCmd(t, env, args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if reqs.count() != 1 || reqs.first() != recipeVersionPath {
+			t.Errorf("%v: requests = %v, want exactly the version path", args, reqs.pathList())
+		}
+		if reqs.hasImageRequest() {
+			t.Errorf("%v: official mode must not request /images", args)
+		}
+	}
+}
+
+// TestRecipe_CommunityDefaultRequest pins the one bounded community list
+// request: exact query, no pagination/visibility parameters, and no
+// version request.
+func TestRecipe_CommunityDefaultRequest(t *testing.T) {
+	env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: testCommunityFixtureBody()})
+	if err := runRecipeCmd(t, env, "3263843", "--source", "community", "--json"); err != nil {
+		t.Fatalf("community --json: %v", err)
+	}
+	if reqs.count() != 1 || reqs.first() != recipeImagesPath {
+		t.Fatalf("requests = %v, want exactly one /images request", reqs.pathList())
+	}
+	assertRecipeExactQuery(t, reqs.queryAt(0), map[string]string{
+		"modelVersionId": "3263843",
+		"withMeta":       "true",
+		"type":           "image",
+		"limit":          "20",
+		"sort":           "Most Reactions",
+		"period":         "AllTime",
+	}, "modelId", "page", "cursor", "nsfw", "browsingLevel")
+
+	var sample api.CommunitySample
+	if err := json.Unmarshal(env.buf.Bytes(), &sample); err != nil {
+		t.Fatalf("community JSON must decode: %v\n%s", err, env.buf.String())
+	}
+	if sample.SchemaVersion != "civ.recipe/v1" || sample.Kind != "communityRecipeSample" {
+		t.Errorf("schema/kind = %q/%q", sample.SchemaVersion, sample.Kind)
+	}
+	if sample.Provenance.Source != "community-images" || sample.Provenance.VersionID != 3263843 {
+		t.Errorf("provenance = %+v", sample.Provenance)
+	}
+	if sample.Coverage.Returned != 3 || sample.Coverage.WithMeta != 2 || sample.Coverage.Usable != 2 ||
+		sample.Coverage.ContinuationOffered {
+		t.Errorf("coverage = %+v", sample.Coverage)
+	}
+	if len(sample.Observations) != 3 {
+		t.Fatalf("observations = %d, want 3", len(sample.Observations))
+	}
+	if sample.Observations[0].ImageID == nil || *sample.Observations[0].ImageID != 1001 {
+		t.Errorf("first observation = %+v", sample.Observations[0])
+	}
+
+	out := env.buf.Bytes()
+	assertRecipeBytesNoKeys(t, out,
+		"prompt", "negativePrompt", "meta", "comfy", "workflow", "description",
+		"url", "thumbnailUrl", "blurHash", "nextCursor", "nextPage")
+	assertRecipeBytesNoText(t, out,
+		"sentinel-list-prompt", "sentinel-list-negative", "sentinel-workflow", "sentinel-comfy")
+}
+
+// TestRecipe_CommunityOptionMatrix pins explicit sorts, limits, and their
+// API enum mapping in the outgoing query.
+func TestRecipe_CommunityOptionMatrix(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantSort  string
+		wantLimit string
+	}{
+		{"defaults", []string{"3263843", "--source", "community"}, "Most Reactions", "20"},
+		{"newest", []string{"3263843", "--source", "community", "--sort", "newest"}, "Newest", "20"},
+		{"api spelling", []string{"3263843", "--source", "community", "--sort", "Most Reactions"}, "Most Reactions", "20"},
+		{"minimum limit", []string{"3263843", "--source", "community", "--limit", "1"}, "Most Reactions", "1"},
+		{"maximum limit", []string{"3263843", "--source", "community", "--limit", "100", "--sort", "newest"}, "Newest", "100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: `{"items":[]}`})
+			if err := runRecipeCmd(t, env, append(tc.args, "--json")...); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if reqs.count() != 1 {
+				t.Fatalf("%s: requests = %d, want 1", tc.name, reqs.count())
+			}
+			assertRecipeExactQuery(t, reqs.queryAt(0), map[string]string{
+				"modelVersionId": "3263843",
+				"withMeta":       "true",
+				"type":           "image",
+				"limit":          tc.wantLimit,
+				"sort":           tc.wantSort,
+				"period":         "AllTime",
+			}, "modelId", "page", "cursor", "nsfw", "browsingLevel")
+		})
+	}
+}
+
+// TestRecipe_CommunityEmptySample proves an empty response is a successful
+// zero-coverage sample with a reported continuation and no retry.
+func TestRecipe_CommunityEmptySample(t *testing.T) {
+	body := `{"items":[],"metadata":{"nextCursor":"sentinel-cursor","nextPage":"https://example.test/next"}}`
+	env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: body})
+	if err := runRecipeCmd(t, env, "3263843", "--source", "community", "--json"); err != nil {
+		t.Fatalf("empty community sample: %v", err)
+	}
+	if reqs.count() != 1 {
+		t.Fatalf("requests = %d, want exactly 1 (no alternate-sort retry)", reqs.count())
+	}
+	var sample api.CommunitySample
+	if err := json.Unmarshal(env.buf.Bytes(), &sample); err != nil {
+		t.Fatalf("decode sample: %v", err)
+	}
+	if sample.Coverage.Returned != 0 || sample.Coverage.WithMeta != 0 || sample.Coverage.Usable != 0 ||
+		!sample.Coverage.ContinuationOffered {
+		t.Errorf("coverage = %+v", sample.Coverage)
+	}
+	if sample.Observations == nil || len(sample.Observations) != 0 {
+		t.Errorf("observations = %#v, want non-nil empty", sample.Observations)
+	}
+	assertRecipeBytesNoKeys(t, env.buf.Bytes(), "nextCursor", "nextPage", "prompt", "meta")
+	assertRecipeBytesNoText(t, env.buf.Bytes(), "sentinel-cursor", "example.test/next")
+
+	human, _ := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: body})
+	if err := runRecipeCmd(t, human, "3263843", "--source", "community"); err != nil {
+		t.Fatalf("empty community human: %v", err)
+	}
+	out := human.buf.String()
+	for _, want := range []string{
+		"returned 0 of 20 requested",
+		"with meta 0/0 (n/a)",
+		"usable 0/0 (n/a)",
+		"continuation yes (not followed)",
+		"(no community images returned for this bounded sample)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human empty sample missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "sentinel-cursor") || strings.Contains(out, "example.test/next") {
+		t.Errorf("human sample leaks continuation metadata:\n%s", out)
+	}
+}
+
+// TestRecipe_CommunityHuman pins the human community list: query, coverage,
+// provenance, separate reactions, normalized parameters, and resources,
+// with no prompt text.
+func TestRecipe_CommunityHuman(t *testing.T) {
+	env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: testCommunityFixtureBody()})
+	if err := runRecipeCmd(t, env, "3263843", "--source", "community"); err != nil {
+		t.Fatalf("community human: %v", err)
+	}
+	if reqs.count() != 1 {
+		t.Fatalf("requests = %d, want 1", reqs.count())
+	}
+	out := env.buf.String()
+	for _, want := range []string{
+		"COMMUNITY  version 3263843   sort Most Reactions   period AllTime   limit 20",
+		"SOURCE     community-images   /api/v1/images",
+		"COVERAGE   returned 3 of 20 requested   with meta 2/3 (66%)   usable 2/3 (66%)   continuation no",
+		"  [1] image 1001   post 10010   by user1001   2026-01-02T03:04:05Z",
+		"      reactions like 3   dislike 0   heart 1   laugh 0   cry 0   comment 2",
+		"meta.seed=866354325141838",
+		"meta.steps=20",
+		"meta.cfgScale=0",
+		"      resource civitaiResources[0] type checkpoint   modelVersionId 249861   name -   hash -   weight -",
+		"      resource resources[0] type lora   modelVersionId -   name Legacy LoRA   hash -   weight 0.65",
+		"Prompt text is omitted from samples; use civ recipe image <imageId> for one image's detail.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human community list missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{
+		"sentinel-list-prompt", "sentinel-list-negative", "sentinel-workflow", "sentinel-comfy",
+		"  prompt:", "negativePrompt:",
+	} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("human community list leaks %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+// TestRecipe_CommunityUsageErrorsBeforeNetwork pins local validation for
+// source, sort, limit, and cross-source option combinations.
+func TestRecipe_CommunityUsageErrorsBeforeNetwork(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"unknown source", []string{"3263843", "--source", "bogus"}},
+		{"empty source", []string{"3263843", "--source="}},
+		{"official with sort", []string{"3263843", "--sort", "newest"}},
+		{"official with limit", []string{"3263843", "--limit", "5"}},
+		{"zero limit", []string{"3263843", "--source", "community", "--limit", "0"}},
+		{"negative limit", []string{"3263843", "--source", "community", "--limit=-1"}},
+		{"limit above max", []string{"3263843", "--source", "community", "--limit", "101"}},
+		{"unsupported sort", []string{"3263843", "--source", "community", "--sort", "random"}},
+		{"empty sort", []string{"3263843", "--source", "community", "--sort="}},
+		{"community with examples", []string{"3263843", "--source", "community", "--examples", "3"}},
+		{"community with example", []string{"3263843", "--source", "community", "--example", "1"}},
+		{"community invalid version", []string{"abc", "--source", "community"}},
+		{"community zero version", []string{"0", "--source", "community"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: `{"items":[]}`})
+			err := runRecipeCmd(t, env, tc.args...)
+			if err == nil {
+				t.Fatalf("%s: expected a usage error", tc.name)
+			}
+			if reqs.count() != 0 {
+				t.Errorf("%s: must fail before network, got %v", tc.name, reqs.pathList())
+			}
+			if env.buf.Len() != 0 {
+				t.Errorf("%s: usage error must not write stdout", tc.name)
+			}
+			if got := exitCodeFor(err, false); got != 1 {
+				t.Errorf("%s: usage-class error must map to exit 1, got %d", tc.name, got)
+			}
+		})
+	}
+}
+
+// TestRecipe_ImageDetailRequest pins the independent exact-image request
+// and the single-detail output contract.
+func TestRecipe_ImageDetailRequest(t *testing.T) {
+	env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: testCommunityDetailBody(1001)})
+	if err := runRecipeCmd(t, env, "image", "1001", "--json"); err != nil {
+		t.Fatalf("recipe image --json: %v", err)
+	}
+	if reqs.count() != 1 || reqs.first() != recipeImagesPath {
+		t.Fatalf("requests = %v, want exactly one /images request", reqs.pathList())
+	}
+	assertRecipeExactQuery(t, reqs.queryAt(0), map[string]string{
+		"imageId":  "1001",
+		"withMeta": "true",
+		"type":     "image",
+		"limit":    "1",
+	}, "sort", "period", "modelVersionId", "modelId", "page", "cursor", "nsfw", "browsingLevel")
+
+	var detail api.CommunityImageDetail
+	if err := json.Unmarshal(env.buf.Bytes(), &detail); err != nil {
+		t.Fatalf("detail JSON must decode: %v\n%s", err, env.buf.String())
+	}
+	if detail.SchemaVersion != "civ.recipe/v1" || detail.Kind != "communityImageDetail" {
+		t.Errorf("schema/kind = %q/%q", detail.SchemaVersion, detail.Kind)
+	}
+	if detail.Provenance.Source != "community-images" || detail.Provenance.ImageID != 1001 {
+		t.Errorf("provenance = %+v", detail.Provenance)
+	}
+	if detail.Image == nil || detail.Image.TextParameters == nil ||
+		detail.Image.TextParameters.Prompt == nil ||
+		*detail.Image.TextParameters.Prompt != "detail-prompt-1001" {
+		t.Fatalf("selected prompt missing: %+v", detail.Image)
+	}
+	if detail.Image.TextParameters.NegativePrompt == nil ||
+		*detail.Image.TextParameters.NegativePrompt != "detail-negative-1001" {
+		t.Errorf("selected negative prompt missing: %+v", detail.Image.TextParameters)
+	}
+
+	out := env.buf.Bytes()
+	assertRecipeBytesNoKeys(t, out,
+		"observations", "examples", "meta", "comfy", "workflow", "description",
+		"url", "thumbnailUrl", "blurHash", "versionId", "sort", "period")
+	assertRecipeBytesNoText(t, out, "sentinel-comfy", "sentinel-workflow", "detail-prompt-1002")
+}
+
+// TestRecipe_ImageDetailHuman pins the human single-image view, including
+// the selected verbatim prompt text.
+func TestRecipe_ImageDetailHuman(t *testing.T) {
+	env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: testCommunityDetailBody(1001)})
+	if err := runRecipeCmd(t, env, "image", "1001"); err != nil {
+		t.Fatalf("recipe image: %v", err)
+	}
+	if reqs.count() != 1 {
+		t.Fatalf("requests = %d, want 1", reqs.count())
+	}
+	out := env.buf.String()
+	for _, want := range []string{
+		"IMAGE      1001",
+		"PROVENANCE community-images   /api/v1/images   imageId 1001",
+		"POST       10010   by user1001   2026-01-02T03:04:05Z",
+		"VISIBILITY nsfw Soft   browsing 1",
+		"REACTIONS  like 3   dislike 0   heart 1   laugh 0   cry 0   comment 2",
+		"METADATA   available   prompt provided   negativePrompt provided",
+		"meta.steps=20",
+		"  prompt:\n",
+		"detail-prompt-1001",
+		"  negativePrompt:\n",
+		"detail-negative-1001",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human image detail missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"sentinel-comfy", "sentinel-workflow"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("human image detail leaks %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+// TestRecipe_ImageDetailUnavailable pins detail-unavailable outcomes: one
+// request, no broadened query, empty stdout.
+func TestRecipe_ImageDetailUnavailable(t *testing.T) {
+	cases := map[string]string{
+		"empty":           `{"items":[]}`,
+		"mismatched":      `{"items":[{"id":999}]}`,
+		"multiple":        `{"items":[{"id":1001},{"id":1001}]}`,
+		"non-object item": `{"items":[42]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: body})
+			err := runRecipeCmd(t, env, "image", "1001", "--json")
+			if err == nil || !strings.Contains(err.Error(), "unavailable") {
+				t.Fatalf("%s: error = %v, want detail-unavailable", name, err)
+			}
+			if reqs.count() != 1 || reqs.first() != recipeImagesPath {
+				t.Errorf("%s: requests = %v, want one /images request", name, reqs.pathList())
+			}
+			if env.buf.Len() != 0 {
+				t.Errorf("%s: detail-unavailable must keep stdout clean", name)
+			}
+			if got := exitCodeFor(err, false); got != 1 {
+				t.Errorf("%s: detail-unavailable maps to exit 1, got %d", name, got)
+			}
+		})
+	}
+}
+
+// TestRecipe_ImageDetailUsageErrors pins local-only validation for the
+// detail command: no request and no stdout for any rejected input.
+func TestRecipe_ImageDetailUsageErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"missing id", []string{"image"}},
+		{"non-numeric id", []string{"image", "abc"}},
+		{"zero id", []string{"image", "0"}},
+		{"two ids", []string{"image", "1001", "1002"}},
+		{"source option", []string{"image", "1001", "--source", "community"}},
+		{"explicit official source", []string{"image", "1001", "--source", "official"}},
+		{"sort option", []string{"image", "1001", "--sort", "newest"}},
+		{"limit option", []string{"image", "1001", "--limit", "5"}},
+		{"examples option", []string{"image", "1001", "--examples", "1"}},
+		{"example option", []string{"image", "1001", "--example", "1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, reqs := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: testCommunityDetailBody(1001)})
+			err := runRecipeCmd(t, env, tc.args...)
+			if err == nil {
+				t.Fatalf("%s: expected a usage error", tc.name)
+			}
+			if reqs.count() != 0 {
+				t.Errorf("%s: must fail before network, got %v", tc.name, reqs.pathList())
+			}
+			if env.buf.Len() != 0 {
+				t.Errorf("%s: usage error must not write stdout", tc.name)
+			}
+			if got := exitCodeFor(err, false); got != 1 {
+				t.Errorf("%s: usage-class error must map to exit 1, got %d", tc.name, got)
+			}
+		})
+	}
+}
+
+// TestRecipe_ImageDetailErrorMapping keeps the shared classes: a 404 stays
+// exit 1 for recipe, and the detail makes one non-retried request.
+func TestRecipe_ImageDetailErrorMapping(t *testing.T) {
+	env, reqs := newRecipeTestEnv(t, nil, nil) // every path 404s
+	err := runRecipeCmd(t, env, "image", "1001", "--json")
+	var nfe *api.NotFoundError
+	if !errors.As(err, &nfe) {
+		t.Fatalf("expected NotFoundError, got %v", err)
+	}
+	if reqs.count() != 1 {
+		t.Errorf("404 must be one request, got %d", reqs.count())
+	}
+	if env.buf.Len() != 0 {
+		t.Errorf("failed detail must keep stdout clean")
+	}
+	if got := exitCodeFor(err, false); got != 1 {
+		t.Errorf("detail 404 must map to exit 1, got %d", got)
+	}
+}
+
+// TestRecipe_NoPersistence proves list and detail invocations write no
+// config, cache, or detail state: the isolated config file never appears.
+func TestRecipe_NoPersistence(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		args []string
+	}{
+		{"community list", testCommunityFixtureBody(), []string{"3263843", "--source", "community", "--json"}},
+		{"image detail", testCommunityDetailBody(1001), []string{"image", "1001", "--json"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _ := newRecipeTestEnv(t, nil, map[string]string{recipeImagesPath: tc.body})
+			if err := runRecipeCmd(t, env, tc.args...); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			path := config.Path()
+			if path == "" {
+				t.Skip("no user config dir in this environment")
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("%s: invocation wrote config state at %s (err=%v)", tc.name, path, err)
+			}
+		})
 	}
 }
