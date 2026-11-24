@@ -269,3 +269,67 @@ func TestParseTags(t *testing.T) {
 		t.Errorf("tags decoded wrong: %+v", tags)
 	}
 }
+
+// TestParseVersion_AIR pins the auxiliary AIR metadata contract: the
+// standalone version fixture carries the canonical AIR URN, an absent air
+// key decodes as empty, and the numeric ids remain authoritative.
+func TestParseVersion_AIR(t *testing.T) {
+	raw := testutil.LoadFixture(t, "version_3263843.json")
+	v, err := ParseVersion(raw)
+	if err != nil {
+		t.Fatalf("ParseVersion: %v", err)
+	}
+	const want = "urn:air:anima:checkpoint:civitai:2458426@3263843"
+	if v.AIR != want {
+		t.Errorf("AIR = %q, want %q", v.AIR, want)
+	}
+	if v.ID != 3263843 || v.ModelID != 2458426 {
+		t.Errorf("numeric ids must stay authoritative: %d / %d", v.ID, v.ModelID)
+	}
+
+	var absent ModelVersion
+	if err := json.Unmarshal([]byte(`{"id":1,"modelId":2}`), &absent); err != nil {
+		t.Fatalf("absent air must decode: %v", err)
+	}
+	if absent.AIR != "" {
+		t.Errorf("absent air = %q, want empty", absent.AIR)
+	}
+
+	var inline ModelVersion
+	if err := json.Unmarshal([]byte(`{"id":2,"air":"urn:air:sdxl:lora:civitai:10@20"}`), &inline); err != nil {
+		t.Fatalf("inline air must decode: %v", err)
+	}
+	if inline.AIR != "urn:air:sdxl:lora:civitai:10@20" {
+		t.Errorf("inline AIR = %q", inline.AIR)
+	}
+}
+
+// TestModelVersion_AIRNotSerialized protects the legacy show/vet JSON
+// contract: AIR is metadata for resolve only and must never appear as an
+// "air" key in marshaled versions or models.
+func TestModelVersion_AIRNotSerialized(t *testing.T) {
+	raw := testutil.LoadFixture(t, "version_3263843.json")
+	v, err := ParseVersion(raw)
+	if err != nil {
+		t.Fatalf("ParseVersion: %v", err)
+	}
+	if v.AIR == "" {
+		t.Fatalf("fixture must populate AIR for this guard to be meaningful")
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+	if strings.Contains(string(b), `"air"`) {
+		t.Errorf("marshaled version must not carry an air key: %s", b)
+	}
+
+	m := Model{ID: 1, ModelVersions: []ModelVersion{{ID: 2, AIR: "urn:air:anima:checkpoint:civitai:1@2"}}}
+	b, err = json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal model: %v", err)
+	}
+	if strings.Contains(string(b), `"air"`) {
+		t.Errorf("marshaled model versions must not carry an air key: %s", b)
+	}
+}

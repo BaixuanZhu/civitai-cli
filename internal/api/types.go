@@ -75,20 +75,29 @@ type ModelVersion struct {
 	Files         []ModelFile   `json:"files"`
 	Images        []Image       `json:"images"`
 	Model         *ModelSummary `json:"model"` // owning model summary (standalone form)
+	// AIR is the canonical AIR identifier of this version as returned by
+	// the registry (e.g. urn:air:anima:checkpoint:civitai:2458426@3263843).
+	// It is auxiliary metadata for resolve reporting, not a file hash or a
+	// substitute for numeric ids, so JSON output must never gain an "air"
+	// key: the field is tag-excluded and populated only by UnmarshalJSON.
+	AIR string `json:"-"`
 }
 
 // UnmarshalJSON decodes a ModelVersion with the same tolerant nsfwLevel
-// handling as Model.
+// handling as Model, plus the auxiliary air field (tolerantly absent: many
+// embedded versions omit it).
 func (v *ModelVersion) UnmarshalJSON(b []byte) error {
 	type alias ModelVersion
 	aux := struct {
 		*alias
 		NSFWLevel json.RawMessage `json:"nsfwLevel"`
+		AIR       string          `json:"air"`
 	}{alias: (*alias)(v)}
 	if err := json.Unmarshal(b, &aux); err != nil {
 		return err
 	}
 	v.NSFWLevel = flexibleNumber(aux.NSFWLevel)
+	v.AIR = aux.AIR
 	return nil
 }
 
