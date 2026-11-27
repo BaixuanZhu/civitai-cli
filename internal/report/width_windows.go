@@ -3,7 +3,6 @@
 package report
 
 import (
-	"os"
 	"syscall"
 	"unsafe"
 )
@@ -19,10 +18,11 @@ type consoleScreenBufferInfo struct {
 	MaximumWindowSize [2]int16
 }
 
-// consoleWidth queries GetConsoleScreenBufferInfo on the stdout handle
-// (kernel32 via syscall, zero third-party deps). Returns 0 on any
-// failure so ConsoleWidth applies the 80-column fallback.
-func consoleWidth() int {
+// consoleWidth queries GetConsoleScreenBufferInfo on the supplied file
+// descriptor (kernel32 via syscall, zero third-party deps). Returns 0 on
+// any failure — including fd not being a console — so the caller applies
+// the 80-column non-console fallback.
+func consoleWidth(fd uintptr) int {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	proc := kernel32.NewProc("GetConsoleScreenBufferInfo")
 	if err := proc.Find(); err != nil {
@@ -30,7 +30,7 @@ func consoleWidth() int {
 	}
 	var info consoleScreenBufferInfo
 	ret, _, _ := proc.Call(
-		uintptr(os.Stdout.Fd()),
+		fd,
 		uintptr(unsafe.Pointer(&info)),
 	)
 	if ret == 0 {

@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,58 @@ func TestConsoleWidth_FallbackUnderTests(t *testing.T) {
 	// 80-column fallback must apply.
 	if got := ConsoleWidth(); got != 80 {
 		t.Errorf("ConsoleWidth under piped stdout = %d, want 80", got)
+	}
+}
+
+func TestConsoleWidthOrFallback(t *testing.T) {
+	cases := []struct {
+		in          int
+		wantWidth   int
+		wantConsole bool
+	}{
+		{120, 120, true}, // successful query keeps the real width
+		{80, 80, true},   // a console of exactly the fallback width is still a console
+		{0, 80, false},   // failed query / non-console falls back without the mode bit
+		{-5, 80, false},  // negative is as invalid as zero
+	}
+	for _, tc := range cases {
+		width, console := consoleWidthOrFallback(tc.in)
+		if width != tc.wantWidth || console != tc.wantConsole {
+			t.Errorf("consoleWidthOrFallback(%d) = (%d, %v), want (%d, %v)",
+				tc.in, width, console, tc.wantWidth, tc.wantConsole)
+		}
+	}
+}
+
+func TestConsoleWidthFor_BufferIsNotConsole(t *testing.T) {
+	// An injected test writer must never inherit the process's real
+	// terminal, even when go test itself runs inside a console.
+	width, console := ConsoleWidthFor(&bytes.Buffer{})
+	if width != 80 || console {
+		t.Errorf("ConsoleWidthFor(&bytes.Buffer{}) = (%d, %v), want (80, false)", width, console)
+	}
+}
+
+func TestConsoleWidthFor_NilFileIsNotConsole(t *testing.T) {
+	var f *os.File
+	width, console := ConsoleWidthFor(f)
+	if width != 80 || console {
+		t.Errorf("ConsoleWidthFor(nil *os.File) = (%d, %v), want (80, false)", width, console)
+	}
+}
+
+func TestConsoleWidthFor_PipeIsNotConsole(t *testing.T) {
+	// A real *os.File that is a pipe exercises the platform query path
+	// (not the type-assertion shortcut) without swapping os.Stdout.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+	width, console := ConsoleWidthFor(w)
+	if width != 80 || console {
+		t.Errorf("ConsoleWidthFor(pipe write end) = (%d, %v), want (80, false)", width, console)
 	}
 }
 

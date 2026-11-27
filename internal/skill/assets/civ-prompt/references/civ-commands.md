@@ -17,7 +17,9 @@ civ search <query> [--type lora] [--base "Flux.1 D"] [--sort most-downloaded] \
 - `--limit` is 1-100.
 - `--json` defaults to the compact `civ.search/v1` envelope (`items[]` of model
   summaries with `id`, `name`, `type`, base model, stats, and every
-  `modelVersions[].id`). `--view full` restores the legacy raw items array.
+  `modelVersions[].id`). Its `summary` reports the returned-page count and
+  non-exclusive base coverage of this one response (never a match total).
+  `--view full` restores the legacy raw items array.
 - Use the chosen item's `id` (modelId) and a `modelVersions[].id` (versionId) with
   `recipe` (preferred) or `show`.
 
@@ -46,6 +48,7 @@ civ recipe <versionId> --json                 # prompt-free summary, 3 examples
 civ recipe <versionId> --examples 0 --json    # counts only, examples: []
 civ recipe <versionId> --example <sourceIndex> --json   # one example's prompt text
 civ recipe <versionId> --source community [--limit 20] [--sort most-reactions] --json
+civ recipe <versionId> --source community --stack-summary --json   # aggregate view
 civ recipe image <imageId> --json             # one exact community image detail
 ```
 
@@ -66,8 +69,19 @@ civ recipe image <imageId> --json             # one exact community image detail
   `--examples`.
 - Community mode performs exactly one bounded `/images` sample
   (`modelVersionId`, `withMeta=true`, `type=image`, `limit`, `sort`,
-  `period=AllTime`) and reports per-image observations only. Continuation is
-  reported but never followed. No aggregation, ranking, or recommendation.
+  `period=AllTime`). The default view reports per-image observations only;
+  continuation is reported but never followed. No ranking or recommendation.
+- `--stack-summary` (community only) re-parses that same single response into
+  the aggregate-only `kind: "communityStackSummary"`: fixed top-5 resource
+  usage by distinct images (identity basis modelVersionId/hash/name, no
+  cross-basis merge), per-LoRA valid-weight medians with sample/image
+  coverage, steps/cfgScale/sampler/scheduler distributions with per-field
+  `observedImages` denominators and an `other` remainder, and
+  prompt/negative-prompt availability as status counts with exact rates (null
+  on an empty sample). No prompt text, raw metadata, workflows, media URLs,
+  per-image observations, or cursor values. The sample is bounded, non-random,
+  and visibility-biased — quote its `coverage`/`caveats`, and treat aggregates
+  as evidence to inspect, never as recommended or reproducible settings.
 - `civ recipe image` performs exactly one `imageId`+`withMeta=true`+
   `type=image`+`limit=1` request and returns only that image's detail.
 
@@ -86,7 +100,13 @@ civ vet <path> --prompts --json
   - `model` — owning-model summary `{id,name,type,url,creator,license,stats}`, or `null`
     when the best-effort model fetch degraded.
   - `examples` — `{total,mature,withMeta}` counts.
-- `--prompts --json` focuses the output on the recipe view (below).
+  - `latestPublished` — informational latest-published visible-version context:
+    `status` (`known`/`tied`/`unknown`), nullable `version`, sorted
+    `tiedVersionIds`, and `comparison` (relationship `currentLatest` /
+    `newerPublished` / `tiedLatest` / `unknown`, exact case-sensitive
+    `baseModelChange`). Descriptive only — never an upgrade recommendation.
+- `--prompts --json` focuses the output on the recipe view (below) and omits
+  `latestPublished` and the other normal report keys.
 - Exit `3` means the hash is not registered on Civitai (not a network failure).
 
 ## Recipe view (`--prompts --json` on show -v / vet)

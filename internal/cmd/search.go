@@ -202,7 +202,10 @@ func runSearch(ctx context.Context, g *globals, pos []string, o *searchOptions) 
 	if err != nil {
 		return err
 	}
-	return renderSearchTable(g.stdout(), models)
+	// Probe the output mode only on the human path, after decoding, so
+	// JSON branches and failure paths never query the console.
+	width, console := report.ConsoleWidthFor(g.stdout())
+	return renderSearchTable(g.stdout(), models, width, console)
 }
 
 // resolveBaseFilters canonicalizes the comma-separated --base list.
@@ -262,16 +265,33 @@ func searchLayout(width int) searchCaps {
 // renderSearchTable prints the plan's search table:
 // ID NAME TYPE BASE DL RATIO UPDATED NSFW CREATOR.
 // UPDATED is the newest version publishedAt (model items carry no
-// updatedAt field — verified live 2026-11-22).
-func renderSearchTable(w io.Writer, models []api.Model) error {
+// updatedAt field — verified live 2026-11-22). After the table (or after
+// "No models found." for an empty result) it appends the returned/base
+// coverage footer computed by api.SummarizeSearchModels over the same
+// models, so human and compact JSON output report identical facts.
+//
+// width and console come from report.ConsoleWidthFor and steer only the
+// NAME cell: a successful console query keeps the width-based rune cap,
+// while non-TTY output (console == false) writes each name verbatim so
+// redirected or piped tables never ellipsize it — those rows may exceed
+// 80 columns. Every other column keeps its width-derived cap in both
+// modes, and no zero/negative cap is ever passed to report.Truncate as
+// an "unlimited" sentinel (Truncate(s, 0) means "").
+func renderSearchTable(w io.Writer, models []api.Model, width int, console bool) error {
 	if len(models) == 0 {
-		_, err := fmt.Fprintln(w, "No models found.")
-		return err
+		if _, err := fmt.Fprintln(w, "No models found."); err != nil {
+			return err
+		}
+		return writeSearchSummary(w, api.SummarizeSearchModels(models))
 	}
-	caps := searchLayout(report.ConsoleWidth())
+	caps := searchLayout(width)
 	tw := report.NewTableWriter(w)
 	fmt.Fprintln(tw, "ID\tNAME\tTYPE\tBASE\tDL\tRATIO\tUPDATED\tNSFW\tCREATOR")
 	for _, m := range models {
+		name := m.Name
+		if console {
+			name = report.Truncate(m.Name, caps.name)
+		}
 		base := "-"
 		if len(m.BaseModels) > 0 {
 			base = strings.Join(m.BaseModels, ",")
@@ -288,7 +308,7 @@ func renderSearchTable(w io.Writer, models []api.Model) error {
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.ID,
-			report.Truncate(m.Name, caps.name),
+			name,
 			report.Truncate(report.DisplayType(m.Type), caps.typ),
 			report.Truncate(base, caps.base),
 			report.CompactNumber(m.Stats.DownloadCount),
@@ -298,7 +318,48 @@ func renderSearchTable(w io.Writer, models []api.Model) error {
 			report.Truncate(m.Creator.Username, caps.creator),
 		)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	return writeSearchSummary(w, api.SummarizeSearchModels(models))
+}
+
+// searchSummaryHumanBaseLimit caps how many sorted base-coverage
+// categories the human footer names; the remainder is reported as an
+// overflow count pointing at --json, which always carries the full list.
+const searchSummaryHumanBaseLimit = 8
+
+// writeSearchSummary appends the two-line search summary footer to the
+// same stdout writer as the table: an explicit reconciliation line (even
+// when every counter is zero) and the sorted base coverage as name=count
+// pairs, "none" when no base was observed. Only the human category list is
+// windowed to searchSummaryHumanBaseLimit entries; emitted names stay
+// verbatim. Writer errors propagate to the command error path.
+func writeSearchSummary(w io.Writer, s api.SearchResultSummary) error {
+	if _, err := fmt.Fprintf(w, "Returned: %d; multi-base models: %d; models without base: %d\n",
+		s.Returned, s.ModelsWithMultipleBases, s.ModelsWithoutBase); err != nil {
+		return err
+	}
+	if len(s.BaseCoverage) == 0 {
+		_, err := fmt.Fprintln(w, "Base coverage: none")
+		return err
+	}
+	shown := s.BaseCoverage
+	more := 0
+	if len(shown) > searchSummaryHumanBaseLimit {
+		more = len(shown) - searchSummaryHumanBaseLimit
+		shown = shown[:searchSummaryHumanBaseLimit]
+	}
+	parts := make([]string, len(shown))
+	for i, c := range shown {
+		parts[i] = fmt.Sprintf("%s=%d", c.BaseModel, c.Models)
+	}
+	line := "Base coverage: " + strings.Join(parts, "; ")
+	if more > 0 {
+		line += fmt.Sprintf("; +%d more (use --json for all)", more)
+	}
+	_, err := fmt.Fprintln(w, line)
+	return err
 }
 
 // latestPublishedAt returns the newest version publishedAt of a model

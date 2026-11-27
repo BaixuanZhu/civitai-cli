@@ -24,6 +24,7 @@ Usage:
   civ recipe <versionId> [--examples <count>] [--json]
   civ recipe <versionId> --example <sourceIndex> [--json]
   civ recipe <versionId> --source community [--sort <order>] [--limit <count>] [--json]
+  civ recipe <versionId> --source community --stack-summary [--sort <order>] [--limit <count>] [--json]
   civ recipe image <imageId> [--json]
 
 Options:
@@ -48,12 +49,22 @@ Options:
   --limit <count>     Community sample size (1-100; default 20): one
                       bounded response with no pagination. Valid only with
                       --source community.
+  --stack-summary     Replace the per-image community list with the
+                      aggregate-only stack summary of the same single
+                      bounded response: at most five resource identities
+                      per group (checkpoint, lora, other) by distinct-image
+                      count, LoRA weight medians with valid-weight coverage,
+                      steps/cfgScale/sampler/scheduler distributions with
+                      observed denominators, and prompt availability counts.
+                      No observations, prompt text, raw metadata, workflows,
+                      or media URLs. Valid only with --source community.
 
 Examples:
   civ recipe 3263843
   civ recipe 3263843 --examples 5 --json
   civ recipe 3263843 --example 1 --json
   civ recipe 3263843 --source community --limit 10 --json
+  civ recipe 3263843 --source community --stack-summary --json
   civ recipe image 123456 --json
 
 Notes:
@@ -71,6 +82,16 @@ Notes:
   retried automatically. Every community list is prompt-free; use
   civ recipe image <imageId> for one image's prompt and negativePrompt.
   Neither mode downloads media or recommends settings.
+
+  --stack-summary is a second view of the same single bounded response,
+  never an extra request. Its counts, rates, and medians describe one
+  bounded non-random sample (Most Reactions and Newest are biased
+  discovery orders, not random samples): they are descriptive evidence
+  only, never recommendations, quality scores, stability claims, or
+  reproducibility guarantees. Resource usage counts distinct sampled
+  images by conservative identity (modelVersionId, then hash, then name;
+  bases never merge), LoRA medians use only valid observed weights, and
+  every distribution reports its observed and sampled denominators.
 `
 
 // Approved recipe source values. Official stays the default, so the
@@ -88,11 +109,12 @@ const (
 // must be rejected in official mode, and `civ recipe image` must reject
 // any option that belongs to another view.
 type recipeOptions struct {
-	examples recipeIntFlag
-	example  recipeIntFlag
-	source   recipeStringFlag
-	sort     recipeStringFlag
-	limit    recipeIntFlag
+	examples     recipeIntFlag
+	example      recipeIntFlag
+	source       recipeStringFlag
+	sort         recipeStringFlag
+	limit        recipeIntFlag
+	stackSummary bool
 }
 
 // register binds the recipe flags to fs.
@@ -103,6 +125,7 @@ func (o *recipeOptions) register(fs *flag.FlagSet) {
 	fs.Var(&o.source, "source", "recipe source: official or community (default official)")
 	fs.Var(&o.sort, "sort", "community sample order: most-reactions or newest (default most-reactions)")
 	fs.Var(&o.limit, "limit", "community sample size, 1-100 (default 20)")
+	fs.BoolVar(&o.stackSummary, "stack-summary", false, "aggregate-only community stack summary of the same bounded sample (community source only)")
 }
 
 // recipeIntFlag is an integer flag.Value that remembers whether the user
@@ -162,11 +185,11 @@ func recipeSourceValue(o *recipeOptions) (string, error) {
 
 // Recipe runs the recipe command:
 // civ recipe <versionId> [--examples <count> | --example <sourceIndex>],
-// civ recipe <versionId> --source community [--sort <order>] [--limit <count>],
-// or civ recipe image <imageId>, all with [--json]. Official views are the
-// default and never request /images; community sampling and exact-image
-// detail are explicit. Errors use the shared 1/2/4 mapping (exit 3 stays
-// vet-only).
+// civ recipe <versionId> --source community [--sort <order>] [--limit <count>]
+// [--stack-summary], or civ recipe image <imageId>, all with [--json].
+// Official views are the default and never request /images; community
+// sampling, the aggregate stack summary, and exact-image detail are
+// explicit. Errors use the shared 1/2/4 mapping (exit 3 stays vet-only).
 func Recipe(args []string) {
 	var o recipeOptions
 	execute("recipe", recipeHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
@@ -206,6 +229,9 @@ func runRecipe(ctx context.Context, g *globals, pos []string, o *recipeOptions) 
 	}
 	if o.limit.set {
 		return errors.New("--limit is valid only with --source community")
+	}
+	if o.stackSummary {
+		return errors.New("--stack-summary is valid only with --source community")
 	}
 	if o.example.set && o.examples.set {
 		return errors.New("--example and --examples cannot be combined: --examples returns prompt-free summaries, --example returns one example's text")
@@ -251,7 +277,9 @@ func runRecipe(ctx context.Context, g *globals, pos []string, o *recipeOptions) 
 // runRecipeCommunity performs the one bounded community sample: one
 // /images list request with the exact version, approved order, fixed
 // AllTime period, and the validated limit. No pagination, alternate-sort
-// retry, detail fan-out, or resource lookup follows.
+// retry, detail fan-out, or resource lookup follows. --stack-summary only
+// selects a different parse of the same bounded body after the fetch; it
+// never adds a second request.
 func runRecipeCommunity(ctx context.Context, g *globals, versionID int, o *recipeOptions) error {
 	if o.examples.set || o.example.set {
 		return errors.New("--examples and --example are official-source selectors; community samples use --limit, and `civ recipe image <imageId>` returns one image's detail")
@@ -277,6 +305,16 @@ func runRecipeCommunity(ctx context.Context, g *globals, versionID int, o *recip
 	if err != nil {
 		return err
 	}
+	if o.stackSummary {
+		summary, err := api.ParseCommunityStackSummary(raw, versionID, limit, sort)
+		if err != nil {
+			return err
+		}
+		if g.JSON {
+			return report.WriteIndent(g.stdout(), summary)
+		}
+		return renderCommunityStackSummary(g.stdout(), summary)
+	}
 	sample, err := api.ParseCommunitySample(raw, versionID, limit, sort)
 	if err != nil {
 		return err
@@ -292,8 +330,8 @@ func runRecipeCommunity(ctx context.Context, g *globals, versionID int, o *recip
 // then projects only that image's detail. It reads no list state, writes
 // nothing, and never fetches media or model-version metadata.
 func runRecipeImage(ctx context.Context, g *globals, arg string, o *recipeOptions) error {
-	if o.examples.set || o.example.set || o.sort.set || o.limit.set || o.source.set {
-		return errors.New("civ recipe image accepts only an image id and --json; --source, --sort, --limit, --examples, and --example are not applicable")
+	if o.examples.set || o.example.set || o.sort.set || o.limit.set || o.source.set || o.stackSummary {
+		return errors.New("civ recipe image accepts only an image id and --json; --source, --sort, --limit, --stack-summary, --examples, and --example are not applicable")
 	}
 	id, err := strconv.Atoi(arg)
 	if err != nil || id <= 0 {

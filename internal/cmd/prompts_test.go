@@ -211,4 +211,33 @@ func TestVet_PromptsJSON(t *testing.T) {
 	if len(r.Prompts) != 9 || r.Skipped != 0 {
 		t.Errorf("vet --prompts --json = %d recipes, %d skipped; want 9/0", len(r.Prompts), r.Skipped)
 	}
+	// The focused recipe view is byte-contract compatible: exactly
+	// {prompts,skipped} at the top level — no latestPublished and none of
+	// the normal vet report keys.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(env.buf.Bytes(), &keys); err != nil {
+		t.Fatalf("json keys must parse: %v", err)
+	}
+	if len(keys) != 2 || keys["prompts"] == nil || keys["skipped"] == nil {
+		t.Errorf("focused prompt JSON must carry exactly {prompts,skipped}, got %d keys: %v", len(keys), env.buf.String())
+	}
+	for _, k := range []string{"latestPublished", "hash", "version", "model", "examples"} {
+		if _, ok := keys[k]; ok {
+			t.Errorf("focused prompt JSON must not contain normal report key %q:\n%s", k, env.buf.String())
+		}
+	}
+	// The command output must equal the shared focused renderer's result
+	// for the same images, so no additive field can sneak in.
+	raw := testutil.LoadFixture(t, "byhash_anima_turbo.json")
+	v, err := api.ParseVersion(raw)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	var want bytes.Buffer
+	if err := renderPrompts(&want, v.Images, true); err != nil {
+		t.Fatalf("renderPrompts: %v", err)
+	}
+	if !bytes.Equal(want.Bytes(), env.buf.Bytes()) {
+		t.Errorf("vet --prompts --json must equal the focused renderPrompts output:\ngot:\n%s\nwant:\n%s", env.buf.String(), want.String())
+	}
 }

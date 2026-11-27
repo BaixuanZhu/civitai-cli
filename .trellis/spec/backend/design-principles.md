@@ -187,6 +187,12 @@ Growth never renegotiates the architecture; it follows these checklists.
    `internal/compare`) with function-value seams; `cmd` owns flags, HTTP
    adapters, rendering, and exit mapping. Do not re-decode or reinterpret the
    same field independently in a renderer.
+5. Machine aggregates over bounded samples are aggregate-only DTOs: they
+   structurally exclude per-image/raw/text/media fields, state observed
+   denominators, bound ranked output deterministically (fixed top + `other`),
+   use conservative identity/deduplication, and emit null on zero
+   denominators. These are public contracts (the `communityStackSummary`
+   pattern), not renderer choices.
 
 ### Command help pages
 

@@ -125,7 +125,7 @@ _civ() {
     case "$cmd" in
         search)     COMPREPLY=( $(compgen -W "--type --base --sort --period --tag --user --limit --view --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         show)       COMPREPLY=( $(compgen -W "-v --ver --prompts --view --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
-        recipe)     COMPREPLY=( $(compgen -W "--examples --example --source --sort --limit --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
+        recipe)     COMPREPLY=( $(compgen -W "--examples --example --source --sort --limit --stack-summary --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         resolve)    COMPREPLY=( $(compgen -W "--json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         compare)    COMPREPLY=( $(compgen -W "--diff --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
         vet)        COMPREPLY=( $(compgen -W "--prompts --json --token --proxy --timeout --verbose" -- "$cur") ) ;;
@@ -227,6 +227,7 @@ _civ() {
                         '--source[recipe source]:source:(official community)' \
                         '--sort[community sample order]:order:(most-reactions newest)' \
                         '--limit[community sample limit]:count:' \
+                        '--stack-summary[aggregate-only community stack summary]' \
                         "${global_specs[@]}"
                     ;;
                 compare)
@@ -347,6 +348,7 @@ complete -c civ -n '__fish_seen_subcommand_from recipe' -l example -x -d 'Select
 complete -c civ -n '__fish_seen_subcommand_from recipe' -l source -x -a 'official community'
 complete -c civ -n '__fish_seen_subcommand_from recipe' -l sort -x -a 'most-reactions newest'
 complete -c civ -n '__fish_seen_subcommand_from recipe' -l limit -x -d 'Community sample limit (1-100)'
+complete -c civ -n '__fish_seen_subcommand_from recipe' -l stack-summary -d 'Aggregate-only community stack summary'
 
 # civ compare
 complete -c civ -n '__fish_seen_subcommand_from compare' -l diff -d 'Hide confirmed-equal fields'
@@ -430,7 +432,7 @@ Register-ArgumentCompleter -Native -CommandName 'civ' -ScriptBlock {
     $commandFlags = @{
         'search'     = @('--type', '--base', '--sort', '--period', '--tag', '--user', '--limit', '--view')
         'show'       = @('-v', '--ver', '--prompts', '--view')
-        'recipe'     = @('--examples', '--example', '--source', '--sort', '--limit')
+        'recipe'     = @('--examples', '--example', '--source', '--sort', '--limit', '--stack-summary')
         'resolve'    = @()
         'compare'    = @('--diff')
         'vet'        = @('--prompts')

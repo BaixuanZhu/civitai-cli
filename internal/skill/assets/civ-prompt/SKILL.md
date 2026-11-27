@@ -70,6 +70,11 @@ generate images. You assemble the prompt; the user's image tool renders it.
 - `civ search --json` and `civ show --json` default to compact envelopes; use
   `--view full` only when you deliberately need a field the compact view omits.
   `civ show -v --prompts --json` remains a legacy compatibility detail view.
+- `civ recipe <versionId> --source community --stack-summary --json` reviews
+  bounded community evidence as aggregates (top-5 resource stacks, parameter
+  distributions, text availability) from one non-random, visibility-biased
+  sample. Quote its `coverage`/`caveats` when using it, and never present top
+  values or medians as recommended settings.
 - `civ` does not download models or images and does not generate images.
 
 ## Resources

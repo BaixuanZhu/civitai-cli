@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // CompactModelSummary is the shared model projection used by compact search
@@ -116,9 +118,12 @@ func ParseCompactModels(raw []byte) (*CompactSearchEnvelope, error) {
 		Kind:          compactKindModelSearch,
 		Items:         make([]CompactModelSummary, len(items)),
 	}
+	evidence := make([]searchBaseEvidence, len(items))
 	for i := range items {
 		out.Items[i] = compactProjectModel(&items[i])
+		evidence[i] = compactModelBaseEvidence(&items[i])
 	}
+	out.Summary = summarizeSearchBaseEvidence(evidence)
 	return out, nil
 }
 
@@ -138,6 +143,114 @@ func ParseCompactModel(raw []byte) (*CompactModelEnvelope, error) {
 		Kind:          compactKindModelSummary,
 		Model:         compactProjectModel(&src),
 	}, nil
+}
+
+// searchBaseEvidence is the raw summary input for one returned model: the
+// model-level baseModels strings and the baseModel strings of every
+// embedded version, in source order. Adapters only extract these fields;
+// the fallback and deduplication policy lives solely in
+// summarizeSearchBaseEvidence so compact JSON and human output can never
+// disagree.
+type searchBaseEvidence struct {
+	modelBases   []string
+	versionBases []string
+}
+
+// compactModelBaseEvidence extracts summary evidence from one compact raw
+// model, preserving nullable version-base presence: an absent or null
+// version baseModel contributes nothing.
+func compactModelBaseEvidence(m *compactRawModel) searchBaseEvidence {
+	ev := searchBaseEvidence{modelBases: m.BaseModels}
+	for i := range m.ModelVersions {
+		if b := m.ModelVersions[i].BaseModel; b != nil {
+			ev.versionBases = append(ev.versionBases, *b)
+		}
+	}
+	return ev
+}
+
+// legacyModelBaseEvidence extracts summary evidence from one legacy
+// decoded Model. Legacy version bases are plain strings; an absent base is
+// the empty string, which the core discards as blank.
+func legacyModelBaseEvidence(m *Model) searchBaseEvidence {
+	ev := searchBaseEvidence{modelBases: m.BaseModels}
+	for i := range m.ModelVersions {
+		ev.versionBases = append(ev.versionBases, m.ModelVersions[i].BaseModel)
+	}
+	return ev
+}
+
+// SummarizeSearchModels projects the legacy decoded search models into the
+// same SearchResultSummary the compact envelope carries, so the human
+// footer and compact JSON report identical facts for one response. It is a
+// thin adapter over the shared evidence core: no request, no pagination,
+// and no primary/default/latest base selection.
+func SummarizeSearchModels(models []Model) SearchResultSummary {
+	evidence := make([]searchBaseEvidence, len(models))
+	for i := range models {
+		evidence[i] = legacyModelBaseEvidence(&models[i])
+	}
+	return summarizeSearchBaseEvidence(evidence)
+}
+
+// summarizeSearchBaseEvidence is the single owner of the base-evidence
+// policy. Per model: usable model-level bases win; only when none remain
+// (absent, null, empty, or all blank) does it fall back to the bases of
+// ALL embedded versions; a still-empty set counts the model as without
+// base. Selected names are deduplicated by exact original value — blank
+// strings are rejected, but retained names are never trimmed, case-folded,
+// or canonicalized. Coverage counts models, not occurrences: each distinct
+// base contributes at most one per model, and a model with several
+// distinct bases increments each of them plus ModelsWithMultipleBases
+// once. Entries are sorted by count descending, then exact name ascending,
+// so map iteration and input order cannot leak into the output.
+func summarizeSearchBaseEvidence(evidence []searchBaseEvidence) SearchResultSummary {
+	summary := SearchResultSummary{
+		Returned:     len(evidence),
+		BaseCoverage: []SearchBaseCoverage{},
+	}
+	coverage := map[string]int{}
+	for _, ev := range evidence {
+		bases := usableBaseSet(ev.modelBases)
+		if len(bases) == 0 {
+			bases = usableBaseSet(ev.versionBases)
+		}
+		if len(bases) == 0 {
+			summary.ModelsWithoutBase++
+			continue
+		}
+		if len(bases) > 1 {
+			summary.ModelsWithMultipleBases++
+		}
+		for base := range bases {
+			coverage[base]++
+		}
+	}
+	for base, models := range coverage {
+		summary.BaseCoverage = append(summary.BaseCoverage, SearchBaseCoverage{BaseModel: base, Models: models})
+	}
+	sort.Slice(summary.BaseCoverage, func(i, j int) bool {
+		a, b := summary.BaseCoverage[i], summary.BaseCoverage[j]
+		if a.Models != b.Models {
+			return a.Models > b.Models
+		}
+		return a.BaseModel < b.BaseModel
+	})
+	return summary
+}
+
+// usableBaseSet deduplicates base names by their exact original value.
+// Values whose TrimSpace is empty are unusable evidence; every other value
+// is kept verbatim, whitespace and case included.
+func usableBaseSet(values []string) map[string]struct{} {
+	set := map[string]struct{}{}
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		set[v] = struct{}{}
+	}
+	return set
 }
 
 // compactRawModel declares only the fields the model summary contracts.

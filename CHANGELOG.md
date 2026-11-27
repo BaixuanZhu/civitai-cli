@@ -9,6 +9,42 @@ Release notes are extracted from the `## [x.y.z]` section matching the tag (see
 when tagging. The `## [x.y.z]` heading format is a machine contract for that
 awk extraction — do not change it casually.
 
+## [Unreleased]
+
+### Added
+
+- `civ recipe <versionId> --source community --stack-summary`: opt-in
+  aggregate-only view over the same single bounded `/images` response (no
+  extra request). Reports top-5 resource stacks by distinct images with
+  conservative modelVersionId/hash/name identity, per-LoRA valid-weight
+  medians with coverage, steps/cfgScale/sampler/scheduler distributions with
+  per-field observed denominators, and prompt/negative-prompt availability as
+  status counts. JSON kind `communityStackSummary` (`civ.recipe/v1`); never
+  emits prompt text, raw metadata, workflows, media URLs, per-image
+  observations, or cursor values, and stays bounded/descriptive — no
+  rankings, scores, or recommendations.
+- `civ search` result summary: human output appends a returned-page footer
+  and the compact `civ.search/v1` envelope gains a `summary` object with
+  `returned`, non-exclusive `baseCoverage` (model-level bases win, all-version
+  fallback, exact per-model dedup), `modelsWithMultipleBases`, and
+  `modelsWithoutBase`. No match totals, percentages, or primary-base
+  inference; `--view full` raw output is unchanged.
+- `civ vet` latest-published context: normal human reports gain one
+  informational `LATEST` line and normal `--json` gains `latestPublished` —
+  the unique maximum valid RFC3339 `publishedAt` among visible versions, the
+  vetted version's relationship (`currentLatest`/`newerPublished`/
+  `tiedLatest`/`unknown`), and an exact base-model comparison, derived from
+  the owning-model response vet already fetches (no extra request).
+  Descriptive only; `vet --prompts --json` stays the focused
+  `{prompts, skipped}` view.
+
+### Fixed
+
+- Human `civ search` output written to a pipe, redirect, or other non-TTY now
+  prints model NAME values in full instead of the 12-rune console truncation;
+  interactive consoles keep width-based truncation, other columns keep their
+  limits, and JSON output is unchanged.
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

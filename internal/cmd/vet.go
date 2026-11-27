@@ -34,6 +34,12 @@ Examples:
   civ vet FBA11953276B57EDF59D1DC4F1857AC05AA079C56F982B4D7C20298D57D3F7EB
   civ vet FBA1195327 --prompts --json
 
+Notes:
+  The LATEST line (latestPublished in --json) names the visible version
+  with the newest valid publishedAt instant, its relation to the vetted
+  version, and an exact base-model comparison. It is informational
+  context only, never an upgrade recommendation.
+
 Exit codes:
   0 hit   1 usage error   2 network failure   3 hash not registered   4 token rejected
 `
@@ -42,9 +48,14 @@ Exit codes:
 // hash up in the Civitai registry (by-hash endpoint) and prints a review
 // report: model/version/creator header, trigger words, files with full
 // hashes and scan results, license grants, and example-image counts.
-// Exit codes (plan §4.3): 0 hit, 3 hash not registered, 1 usage error,
-// 2 network failure, 4 rejected token. --prompts appends the example-image
-// generation recipes (M3).
+// The normal report also carries informational latest-published context
+// (the LATEST line, or the latestPublished block in --json): the visible
+// owning-model version with the newest valid publishedAt instant, its
+// relation to the vetted version, and an exact base-model comparison —
+// context only, never an upgrade recommendation. Exit codes (plan §4.3):
+// 0 hit, 3 hash not registered, 1 usage error, 2 network failure,
+// 4 rejected token. --prompts appends the example-image generation
+// recipes (M3).
 func Vet(args []string) {
 	var o vetOptions
 	executeWithExitCode("vet", vetHelp, args, o.register, func(ctx context.Context, g *globals, pos []string) error {
@@ -106,7 +117,10 @@ func isHex(s string) bool {
 // classify the argument, hash local files streaming, query by-hash,
 // fetch the owning model for creator/license context, render the report.
 // --prompts appends the example-image recipes (text) or focuses the JSON
-// output on the recipe view.
+// output on the recipe view. For normal output the latest-published
+// visible-version context is derived once from the already-fetched model
+// response, so the human and JSON views share one evaluation and no
+// additional request is ever made.
 func runVet(ctx context.Context, g *globals, pos []string, o *vetOptions) error {
 	if len(pos) != 1 {
 		return errors.New("vet requires exactly one argument: a file path, a 64-char SHA256, or a 10-char AutoV2")
@@ -140,13 +154,16 @@ func runVet(ctx context.Context, g *globals, pos []string, o *vetOptions) error 
 	}
 	m := fetchVetModel(ctx, c, v.ModelID)
 
-	if g.JSON {
-		if o.prompts {
-			return renderPrompts(g.stdout(), v.Images, true)
-		}
-		return report.WriteIndent(g.stdout(), newVetReport(hash, v, m))
+	// The focused prompt-JSON view keeps its exact {prompts,skipped}
+	// contract and returns before the latest context is derived.
+	if g.JSON && o.prompts {
+		return renderPrompts(g.stdout(), v.Images, true)
 	}
-	if err := renderVetReport(g.stdout(), v, m); err != nil {
+	latest := deriveVetLatestPublished(v, m)
+	if g.JSON {
+		return report.WriteIndent(g.stdout(), newVetReport(hash, v, m, latest))
+	}
+	if err := renderVetReport(g.stdout(), v, m, latest); err != nil {
 		return err
 	}
 	if o.prompts {
@@ -205,12 +222,14 @@ func fetchVetModel(ctx context.Context, c *api.Client, id int) *api.Model {
 }
 
 // renderVetReport prints the plan §4.3 review report: MODEL/VERSION/
-// CREATOR header, TRIGGER WORDS plain-text block (one word per line, no
-// quotes or bullets — directly copyable), FILES with full SHA256/AutoV2
-// and scan results, the LICENSE four-grant line, and EXAMPLES counts.
-// DL/ratio describe the vetted version; comments are model-level (version
-// stats carry no commentCount). m may be nil (degraded model fetch).
-func renderVetReport(w io.Writer, v *api.ModelVersion, m *api.Model) error {
+// LATEST/CREATOR header, TRIGGER WORDS plain-text block (one word per
+// line, no quotes or bullets — directly copyable), FILES with full
+// SHA256/AutoV2 and scan results, the LICENSE four-grant line, and
+// EXAMPLES counts. The LATEST line is the pre-evaluated latest-published
+// context (one concise informational line, never advice). DL/ratio
+// describe the vetted version; comments are model-level (version stats
+// carry no commentCount). m may be nil (degraded model fetch).
+func renderVetReport(w io.Writer, v *api.ModelVersion, m *api.Model, latest vetLatestPublished) error {
 	width := report.ConsoleWidth()
 
 	modelName := "-"
@@ -236,6 +255,7 @@ func renderVetReport(w io.Writer, v *api.ModelVersion, m *api.Model) error {
 
 	fmt.Fprintf(w, "MODEL     %s   %s\n", report.Truncate(modelName, max(width-50, 16)), modelURL)
 	fmt.Fprintf(w, "VERSION   %s (%s)   base: %s\n", report.Truncate(versionName, max(width-34-len(base), 12)), published, base)
+	fmt.Fprintf(w, "LATEST    %s\n", vetLatestLineText(latest, width))
 	fmt.Fprintf(w, "CREATOR   %s   DL %s   ratio %s   comments %s\n",
 		report.Truncate(creator, max(width-48, 12)),
 		report.CompactNumber(v.Stats.DownloadCount),
@@ -318,13 +338,16 @@ func countExamples(images []api.Image) vetExamples {
 // vetReport is the --json review object: the queried hash (uppercase;
 // the computed SHA256 for path input), the full decoded version (files
 // with every hash under version.files, trigger words, example images),
-// the owning-model summary (creator, license grants, stats, URL), and
-// example-image counts. Model is null when the model fetch degraded.
+// the owning-model summary (creator, license grants, stats, URL), the
+// additive latest-published visible-version context, and example-image
+// counts. Model is null when the model fetch degraded; latestPublished
+// is always present (unknown states included).
 type vetReport struct {
-	Hash     string            `json:"hash"`
-	Version  *api.ModelVersion `json:"version"`
-	Model    *vetModelSummary  `json:"model"`
-	Examples vetExamples       `json:"examples"`
+	Hash            string             `json:"hash"`
+	Version         *api.ModelVersion  `json:"version"`
+	Model           *vetModelSummary   `json:"model"`
+	LatestPublished vetLatestPublished `json:"latestPublished"`
+	Examples        vetExamples        `json:"examples"`
 }
 
 // vetModelSummary is the owning-model context of a vet hit.
@@ -354,10 +377,12 @@ type vetExamples struct {
 	WithMeta int `json:"withMeta"`
 }
 
-// newVetReport assembles the --json review object from the by-hash hit
-// and the optional owning-model details.
-func newVetReport(hash string, v *api.ModelVersion, m *api.Model) vetReport {
-	r := vetReport{Hash: hash, Version: v, Examples: countExamples(v.Images)}
+// newVetReport assembles the --json review object from the by-hash hit,
+// the optional owning-model details, and the pre-evaluated
+// latest-published context (derived once in runVet so human and JSON
+// output cannot disagree).
+func newVetReport(hash string, v *api.ModelVersion, m *api.Model, latest vetLatestPublished) vetReport {
+	r := vetReport{Hash: hash, Version: v, LatestPublished: latest, Examples: countExamples(v.Images)}
 	if m != nil {
 		r.Model = &vetModelSummary{
 			ID:      m.ID,

@@ -105,6 +105,14 @@ run search_json      search anima --json --limit 3 --view full
 run search_compact   search anima --json --limit 3
 run search_table     search stocking --type lora --limit 5
 run search_filters   search girl --base Illustrious --sort most-downloaded --period all --type lora --json --limit 3 --view full
+# search summary empty page (task 11-27-search-base-model-summary): an
+# unregistered base passes through with a stderr warning and yields a
+# successful zero-item page with a zeroed summary.
+run search_compact_empty search summary-empty --base __civ_search_summary_no_such_base__ --json --limit 1
+# search non-TTY names (task 11-27-non-tty-search-names): `run` redirects
+# stdout, so this pairs the real executable's non-TTY human path with the
+# full-JSON response above (identical query parameters).
+run search_names_table search anima --limit 3
 run show_json        show 2458426 --json --view full
 run show_compact     show 2458426 --json
 run show_version     show 2458426 -v 3263843 --json --view full
@@ -114,6 +122,14 @@ run recipe_summary   recipe 3263843 --json
 run recipe_detail    recipe 3263843 --example 1 --json
 run recipe_community recipe 3263843 --source community --limit 5 --json
 run recipe_community_newest recipe 3263843 --source community --sort newest --limit 5 --json
+# community stack summary (task 11-27-community-stack-summary): opt-in
+# aggregate-only view over the same single bounded /images response.
+run recipe_community_stack recipe 3263843 --source community --stack-summary --limit 5 --json
+run recipe_community_stack_newest recipe 3263843 --source community --stack-summary --sort newest --limit 5 --json
+# --stack-summary is community-only and keeps pre-network usage validation.
+run recipe_stack_official recipe 3263843 --stack-summary
+run recipe_stack_bad_limit recipe 3263843 --source community --stack-summary --limit 0
+run recipe_stack_selector_conflict recipe 3263843 --source community --stack-summary --example 1
 run recipe_bad_id    recipe 0
 run recipe_bad_count recipe 3263843 --examples 11
 run recipe_select_conflict recipe 3263843 --examples 2 --example 0
@@ -263,6 +279,7 @@ echo "[integration] asserting responses..."
 python - "$WORK" "$ISO_HOME" "$INT_HOME" <<'PYEOF'
 import json
 import os
+import re
 import sys
 
 WORK = sys.argv[1]
@@ -306,22 +323,45 @@ def json_of(label):
 check(exit_of('version') == 0 and out_of('version').startswith('civ '),
       'version: exit 0 and prints "civ <version>"')
 
-# search --json: raw items array passthrough with core fields
-items = json_of('search_json')
-items = items if isinstance(items, list) else []
-check(exit_of('search_json') == 0 and len(items) > 0
+# search --json --view full: the top level stays the raw items array (never an
+# items/summary envelope), with core fields on the first entries
+raw_items = json_of('search_json')
+check(exit_of('search_json') == 0 and isinstance(raw_items, list),
+      'search --json --view full: top level remains a raw array, not an object')
+items = raw_items if isinstance(raw_items, list) else []
+check(len(items) > 0
       and all('id' in i and 'name' in i and 'type' in i for i in items[:3]),
       'search --json: non-empty items array carrying id/name/type')
 
-# search table: human header present, stdout non-empty
-check(exit_of('search_table') == 0 and 'NAME' in out_of('search_table'),
+# search table: human header present, plus the returned-page summary footer
+# (task 11-27-search-base-model-summary); live base names are never pinned
+table_out = out_of('search_table')
+check(exit_of('search_table') == 0 and 'NAME' in table_out,
       'search table: exit 0 and header row present')
+ret_m = re.search(r'^Returned: (\d+); multi-base models: \d+; models without base: \d+$',
+                  table_out, re.M)
+cov_m = re.search(r'^Base coverage: (.+)$', table_out, re.M)
+check(ret_m is not None and cov_m is not None,
+      'search table: Returned/Base coverage footer labels present')
+check(cov_m is not None and '=0' not in cov_m.group(1),
+      'search table: no fabricated zero-count base category')
 
-# search filters: --base/--sort/--period/--type accepted, valid JSON array
+# search non-TTY names (task 11-27-non-tty-search-names): every model name in
+# the paired full-JSON response appears verbatim in the redirected human
+# output. Guaranteed long/Unicode cases live in the unit tests; live results
+# only provide the real-pipe smoke, so names are never hard-coded here.
+names_out = out_of('search_names_table')
+check(exit_of('search_names_table') == 0 and 'NAME' in names_out,
+      'search non-TTY table: exit 0 and NAME header present')
+for i in items:
+    check(isinstance(i.get('name'), str) and i['name'] in names_out,
+          'search non-TTY table: full name of model %s present verbatim' % i.get('id'))
+
+# search filters: --base/--sort/--period/--type accepted, still a raw array
 filt = json_of('search_filters')
 check(exit_of('search_filters') == 0 and isinstance(filt, list)
       and (len(filt) == 0 or all('id' in i and 'name' in i for i in filt)),
-      'search filters (--base/--sort/--period/--type): exit 0 and JSON array')
+      'search filters (--base/--sort/--period/--type): exit 0 and raw JSON array')
 
 # show --json: structured model object
 model = json_of('show_json')
@@ -345,6 +385,71 @@ check(exit_of('search_compact') == 0 and isinstance(sc, dict)
       'search --json default compact: versioned envelope with model summaries')
 check(sc is not None and 'description' not in json.dumps(sc),
       'search compact: no description blobs')
+
+# search compact summary (task 11-27-search-base-model-summary): returned-page
+# facts only. Coverage and both reconciliation counters are recomputed here
+# from the items with the same evidence policy (usable model-level bases win;
+# otherwise distinct bases across all embedded versions; exact per-model
+# dedup), then compared against the emitted summary including its
+# count-descending/name-ascending order. Live base names are never pinned.
+summ = sc.get('summary') if isinstance(sc, dict) else None
+check(isinstance(summ, dict)
+      and summ.get('returned') == len(sc['items'])
+      and isinstance(summ.get('baseCoverage'), list)
+      and isinstance(summ.get('modelsWithMultipleBases'), int)
+      and isinstance(summ.get('modelsWithoutBase'), int),
+      'search compact: summary object with returned == len(items) and required members')
+
+
+def summary_bases(item):
+    bases = []
+    for b in item.get('baseModels') or []:
+        if isinstance(b, str) and b.strip() and b not in bases:
+            bases.append(b)
+    if bases:
+        return bases
+    for v in item.get('versions') or []:
+        if not isinstance(v, dict):
+            continue
+        b = v.get('baseModel')
+        if isinstance(b, str) and b.strip() and b not in bases:
+            bases.append(b)
+    return bases
+
+
+expect_cov = {}
+expect_multi = 0
+expect_nobase = 0
+for it in sc['items']:
+    bs = summary_bases(it)
+    if not bs:
+        expect_nobase += 1
+    if len(bs) > 1:
+        expect_multi += 1
+    for b in bs:
+        expect_cov[b] = expect_cov.get(b, 0) + 1
+expect_rows = sorted(expect_cov.items(), key=lambda kv: (-kv[1], kv[0]))
+got_rows = None
+if isinstance(summ, dict) and isinstance(summ.get('baseCoverage'), list):
+    got_rows = [(r.get('baseModel'), r.get('models')) for r in summ['baseCoverage']]
+check(got_rows == expect_rows
+      and all(isinstance(m, int) and m > 0 for _, m in (got_rows or []))
+      and isinstance(summ, dict)
+      and summ.get('modelsWithMultipleBases') == expect_multi
+      and summ.get('modelsWithoutBase') == expect_nobase,
+      'search compact: baseCoverage matches independent recomputation, sorted count-desc/name-asc')
+
+# search compact empty page: unregistered base -> exit 0, items [], zeroed
+# summary; the unknown-base warning stays on stderr (stdout parsed as JSON above)
+se = json_of('search_compact_empty')
+check(exit_of('search_compact_empty') == 0 and isinstance(se, dict)
+      and se.get('items') == []
+      and isinstance(se.get('summary'), dict)
+      and se['summary'].get('returned') == 0
+      and se['summary'].get('baseCoverage') == []
+      and se['summary'].get('modelsWithMultipleBases') == 0
+      and se['summary'].get('modelsWithoutBase') == 0,
+      'search compact empty: exit 0, items [], zeroed summary')
 
 sm = json_of('show_compact')
 check(exit_of('show_compact') == 0 and isinstance(sm, dict)
@@ -377,23 +482,71 @@ report = json_of('vet_hit')
 check(exit_of('vet_hit') == 0 and isinstance(report, dict) and 'version' in report,
       'vet known SHA256 --json: exit 0 and report carries version')
 
-# vet AutoV2 hit
-check(exit_of('vet_autov2') == 0,
-      'vet AutoV2: exit 0 (same version hit)')
+# vet latestPublished (task 11-27-vet-latest-version-context): additive block
+# with approved vocabularies and internally consistent shapes. Live version
+# drift is tolerated: known/tied/unknown are all valid outcomes.
+lp = report.get('latestPublished') if isinstance(report, dict) else None
+check(isinstance(lp, dict)
+      and lp.get('status') in ('known', 'tied', 'unknown')
+      and isinstance(lp.get('tiedVersionIds'), list)
+      and isinstance(lp.get('comparison'), dict),
+      'vet --json: latestPublished object with approved status vocabulary')
+comp = lp.get('comparison') if isinstance(lp, dict) else None
+check(isinstance(comp, dict)
+      and comp.get('status') in ('currentLatest', 'newerPublished', 'tiedLatest', 'unknown')
+      and comp.get('baseModelChange') in ('changed', 'unchanged', 'unknown')
+      and (comp.get('status') != 'unknown' or bool(comp.get('reason'))),
+      'vet --json: relationship/base tokens approved, unknown comparison has a reason')
+vid = report.get('version', {}).get('id') if isinstance(report, dict) else None
+lp_ok = False
+if isinstance(lp, dict) and isinstance(comp, dict):
+    st = lp.get('status')
+    rel = comp.get('status')
+    if st == 'known':
+        v = lp.get('version') or {}
+        lp_ok = (isinstance(v.get('id'), int) and v.get('id') > 0
+                 and 'name' in v and 'publishedAt' in v and 'baseModel' in v
+                 and rel in ('currentLatest', 'newerPublished', 'unknown')
+                 and (rel != 'currentLatest' or v.get('id') == vid)
+                 and (rel != 'newerPublished' or v.get('id') != vid))
+    elif st == 'tied':
+        ids = lp.get('tiedVersionIds')
+        lp_ok = (lp.get('version') is None and isinstance(ids, list)
+                 and len(ids) >= 2 and ids == sorted(set(ids))
+                 and comp.get('baseModelChange') == 'unknown'
+                 and (rel != 'tiedLatest' or vid in ids))
+    else:  # unknown
+        lp_ok = (lp.get('version') is None and bool(lp.get('reason'))
+                 and rel == 'unknown' and comp.get('baseModelChange') == 'unknown')
+check(lp_ok,
+      'vet --json: latestPublished internal invariants per status shape')
 
-# vet --prompts --json: recipe view
+# vet AutoV2 hit: human report carries exactly one LATEST line with state
+# wording and no outdated/upgrade/recommendation language
+av_lines = [ln for ln in out_of('vet_autov2').splitlines() if ln.startswith('LATEST')]
+check(exit_of('vet_autov2') == 0 and len(av_lines) == 1
+      and re.search(r'current latest|newer|tied|unknown', av_lines[0], re.I),
+      'vet AutoV2: exit 0, exactly one LATEST line with state wording')
+check(not av_lines
+      or not re.search(r'outdated|upgrade|recommend|best', av_lines[0], re.I),
+      'vet AutoV2: LATEST line carries no outdated/upgrade/recommendation wording')
+
+# vet --prompts --json: focused recipe view, exactly {prompts,skipped} at the
+# top level (no latestPublished or normal report keys)
 vp = json_of('vet_prompts')
 check(exit_of('vet_prompts') == 0 and isinstance(vp, dict)
       and isinstance(vp.get('prompts'), list) and len(vp['prompts']) > 0,
       'vet --prompts --json: non-empty recipes')
+check(isinstance(vp, dict) and sorted(vp.keys()) == ['prompts', 'skipped'],
+      'vet --prompts --json: exactly the focused {prompts,skipped} top-level keys')
 
-# vet unknown hash -> exit 3 (not registered)
-check(exit_of('vet_miss') == 3,
-      'vet unknown hash: exit 3 (not registered)')
+# vet unknown hash -> exit 3 (not registered), no partial report on stdout
+check(exit_of('vet_miss') == 3 and out_of('vet_miss').strip() == '',
+      'vet unknown hash: exit 3 (not registered), empty stdout')
 
-# vet bad input (8 hex -> path semantics, missing file) -> exit 1
-check(exit_of('vet_badinput') == 1,
-      'vet bad input: exit 1 (usage-class)')
+# vet bad input (8 hex -> path semantics, missing file) -> exit 1, empty stdout
+check(exit_of('vet_badinput') == 1 and out_of('vet_badinput').strip() == '',
+      'vet bad input: exit 1 (usage-class), empty stdout')
 
 # sync: not_found data rows, overall exit 0
 check(exit_of('sync') == 0 and 'not_found' in out_of('sync'),
@@ -445,6 +598,118 @@ check(exit_of('recipe_community_newest') == 0 and isinstance(rcn, dict)
       and rcn.get('query', {}).get('sort') == 'Newest',
       'recipe --source community --sort Newest: accepted and reported')
 
+
+# community stack summary (task 11-27-community-stack-summary): aggregate-only
+# view over the same single bounded response. Live metadata content varies, so
+# assertions pin structure, denominators, ordering, and redaction — never
+# specific stack values, and never a retried sort to force data.
+def walk_keys(obj, hit):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            hit.append(k)
+            walk_keys(v, hit)
+    elif isinstance(obj, list):
+        for v in obj:
+            walk_keys(v, hit)
+
+
+def check_stack(label, want_sort):
+    st = json_of(label)
+    check(exit_of(label) == 0 and isinstance(st, dict)
+          and st.get('schemaVersion') == 'civ.recipe/v1'
+          and st.get('kind') == 'communityStackSummary'
+          and st.get('topLimit') == 5
+          and st.get('caveats') == ['boundedNonRandomSample',
+                                    'continuationNotFollowed',
+                                    'descriptiveEvidenceOnly']
+          and not any(k in st for k in ('observations', 'examples', 'image', 'textParameters')),
+          '%s: communityStackSummary envelope, fixed caveats, aggregate-only members' % label)
+    if not isinstance(st, dict):
+        return
+    q = st.get('query') or {}
+    cov = st.get('coverage') or {}
+    prov = st.get('provenance') or {}
+    check(q.get('versionId') == 3263843 and q.get('type') == 'image'
+          and q.get('limit') == 5 and q.get('sort') == want_sort
+          and q.get('period') == 'AllTime'
+          and prov.get('source') == 'community-images'
+          and prov.get('apiPath') == '/api/v1/images'
+          and prov.get('versionId') == 3263843
+          and sorted(cov.keys()) == ['continuationOffered', 'requestedLimit',
+                                     'returned', 'usable', 'withMeta']
+          and cov.get('requestedLimit') == 5
+          and isinstance(cov.get('continuationOffered'), bool),
+          '%s: query/provenance/coverage echo the one bounded request' % label)
+    returned = cov.get('returned')
+    res = st.get('resources') or {}
+    groups_ok = True
+    for gname in ('checkpoints', 'loras', 'otherResources'):
+        grp = res.get(gname) or {}
+        top = grp.get('top')
+        if not isinstance(top, list) or len(top) > 5:
+            groups_ok = False
+            continue
+        for row in top:
+            ident = row.get('identity') or {}
+            if ident.get('basis') not in ('modelVersionId', 'hash', 'name'):
+                groups_ok = False
+            if not isinstance(row.get('imageCount'), int) or row['imageCount'] < 0:
+                groups_ok = False
+            if gname != 'loras' and 'weight' in row:
+                groups_ok = False
+    check(groups_ok,
+          '%s: resource groups bounded to top 5 with approved identity bases' % label)
+    loras = (res.get('loras') or {}).get('top') or []
+    check(all(((r.get('weight') or {}).get('sampleCount') == 0
+               and (r.get('weight') or {}).get('median') is None)
+              or (isinstance((r.get('weight') or {}).get('median'), (int, float))
+                  and 0 <= ((r.get('weight') or {}).get('imagesWithWeight') or 0)
+                  <= (r.get('imageCount') or 0))
+              for r in loras),
+          '%s: LoRA median null iff no valid weight samples, coverage bounded' % label)
+    params = st.get('parameters') or {}
+    param_ok = sorted(params.keys()) == ['cfgScale', 'sampler', 'scheduler', 'steps']
+    for dist in params.values():
+        top = (dist or {}).get('top') or []
+        other = (dist or {}).get('other') or {}
+        observed = (dist or {}).get('observedImages')
+        if (dist or {}).get('sampledImages') != returned or len(top) > 5:
+            param_ok = False
+        if sum(r.get('imageCount') or 0 for r in top) + (other.get('imageCount') or 0) != observed:
+            param_ok = False
+    check(param_ok,
+          '%s: four parameter distributions, sampled==returned, top+other==observed' % label)
+    text = st.get('textAvailability') or {}
+    text_ok = True
+    for field in ('promptStatus', 'negativePromptStatus'):
+        f = text.get(field) or {}
+        counts = [f.get(k) for k in ('provided', 'empty', 'notProvided', 'unsupportedJsonShape')]
+        if any(not isinstance(c, int) for c in counts) or sum(counts) != returned:
+            text_ok = False
+        rate = f.get('providedRate')
+        if returned == 0 and rate is not None:
+            text_ok = False
+        if returned and isinstance(rate, (int, float)) \
+                and abs(rate - (f.get('provided') or 0) / returned) > 1e-9:
+            text_ok = False
+    check(text_ok,
+          '%s: text status counts sum to returned with exact provided rates' % label)
+    keys = []
+    walk_keys(st, keys)
+    banned = {'prompt', 'negativeprompt', 'meta', 'workflow', 'comfyui', 'url',
+              'pageurl', 'thumbnail', 'blurhash', 'cursor', 'continuationtoken',
+              'nextpage', 'observations'}
+    check(not banned.intersection(k.lower() for k in keys),
+          '%s: no prompt/meta/workflow/media/cursor keys anywhere in the aggregate' % label)
+
+
+check_stack('recipe_community_stack', 'Most Reactions')
+check_stack('recipe_community_stack_newest', 'Newest')
+
+for label in ('recipe_stack_official', 'recipe_stack_bad_limit', 'recipe_stack_selector_conflict'):
+    check(exit_of(label) == 1 and out_of(label).strip() == '',
+          '%s: exit 1, empty stdout (--stack-summary validation before network)' % label)
+
 check(exit_of('recipe_bad_id') == 1 and out_of('recipe_bad_id').strip() == '',
       'recipe 0: exit 1, empty stdout')
 check(exit_of('recipe_image_bad') == 1 and out_of('recipe_image_bad').strip() == '',
@@ -482,9 +747,9 @@ check(exit_of('compare_few') == 1 and out_of('compare_few').strip() == '',
 check(exit_of('compare_dupe') == 1 and out_of('compare_dupe').strip() == '',
       'compare with duplicate subjects: usage exit 1, empty stdout')
 
-# usage error: limit over 100 rejected CLI-side -> exit 1
-check(exit_of('usage_error') == 1,
-      'search --limit 101: exit 1 (CLI-side cap)')
+# usage error: limit over 100 rejected CLI-side -> exit 1, empty stdout
+check(exit_of('usage_error') == 1 and out_of('usage_error').strip() == '',
+      'search --limit 101: exit 1 (CLI-side cap), empty stdout')
 
 # help / unknown command: usage surface (offline)
 h = out_of('help_cmd')
@@ -515,7 +780,7 @@ check(exit_of('unknown_cmd') == 1
 help_sigs = {
     'search': [['--sort'], ['Examples:']],
     'show': [['--ver', '-v']],
-    'recipe': [['--examples'], ['Examples:']],
+    'recipe': [['--examples'], ['--stack-summary'], ['Examples:']],
     'resolve': [['version:<id>'], ['Exit codes:']],
     'compare': [['--diff'], ['Examples:']],
     'vet': [['Exit codes:', '3']],

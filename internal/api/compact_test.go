@@ -158,6 +158,22 @@ func TestCompactSearch_Fixture(t *testing.T) {
 		t.Errorf("second item versions = %d, want 3", len(env.Items[1].Versions))
 	}
 
+	// The summary aggregates only this returned page: exact per-model
+	// dedup, model-level precedence, coverage counted in models. Counts
+	// tie at 1, so categories sort by exact name ascending.
+	wantSummary := SearchResultSummary{
+		Returned: 2,
+		BaseCoverage: []SearchBaseCoverage{
+			{BaseModel: "Anima", Models: 1},
+			{BaseModel: "SDXL 1.0", Models: 1},
+		},
+		ModelsWithMultipleBases: 0,
+		ModelsWithoutBase:       0,
+	}
+	if !reflect.DeepEqual(env.Summary, wantSummary) {
+		t.Errorf("summary = %+v, want %+v", env.Summary, wantSummary)
+	}
+
 	// Excluded heavy fields must never leak into a list/summary projection.
 	out := string(compactMarshal(t, env))
 	for _, sentinel := range []string{
@@ -167,6 +183,240 @@ func TestCompactSearch_Fixture(t *testing.T) {
 		if strings.Contains(out, sentinel) {
 			t.Errorf("compact search output leaks %s", sentinel)
 		}
+	}
+}
+
+func TestCompactSearch_SummaryEvidencePolicy(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want SearchResultSummary
+	}{
+		{
+			name: "usable model-level bases suppress version-only bases",
+			body: `{"items":[{"baseModels":["SDXL 1.0"],"modelVersions":[{"baseModel":"Pony"},{"baseModel":"SDXL 1.0"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     1,
+				BaseCoverage: []SearchBaseCoverage{{BaseModel: "SDXL 1.0", Models: 1}},
+			},
+		},
+		{
+			name: "absent model-level bases fall back to all embedded versions",
+			body: `{"items":[{"modelVersions":[{"baseModel":"Pony"},{"baseModel":"SDXL 1.0"},{"baseModel":"Pony"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 1,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "Pony", Models: 1},
+					{BaseModel: "SDXL 1.0", Models: 1},
+				},
+				ModelsWithMultipleBases: 1,
+			},
+		},
+		{
+			name: "null model-level bases fall back to versions",
+			body: `{"items":[{"baseModels":null,"modelVersions":[{"baseModel":"Pony"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     1,
+				BaseCoverage: []SearchBaseCoverage{{BaseModel: "Pony", Models: 1}},
+			},
+		},
+		{
+			name: "empty model-level bases fall back to versions",
+			body: `{"items":[{"baseModels":[],"modelVersions":[{"baseModel":"Pony"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     1,
+				BaseCoverage: []SearchBaseCoverage{{BaseModel: "Pony", Models: 1}},
+			},
+		},
+		{
+			name: "all-blank model-level bases fall back to versions",
+			body: `{"items":[{"baseModels":["","   "],"modelVersions":[{"baseModel":"Pony"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     1,
+				BaseCoverage: []SearchBaseCoverage{{BaseModel: "Pony", Models: 1}},
+			},
+		},
+		{
+			name: "duplicates within model-level data count once per model",
+			body: `{"items":[{"baseModels":["SDXL 1.0","Pony","Pony"]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 1,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "Pony", Models: 1},
+					{BaseModel: "SDXL 1.0", Models: 1},
+				},
+				ModelsWithMultipleBases: 1,
+			},
+		},
+		{
+			name: "duplicates across fallback versions count once per model",
+			body: `{"items":[{"modelVersions":[{"baseModel":"SDXL 1.0"},{"baseModel":"SDXL 1.0"}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     1,
+				BaseCoverage: []SearchBaseCoverage{{BaseModel: "SDXL 1.0", Models: 1}},
+			},
+		},
+		{
+			name: "absent null empty and blank version bases contribute nothing",
+			body: `{"items":[{"baseModels":[],"modelVersions":[{"baseModel":""},{"baseModel":"  "},{"baseModel":null},{}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:          1,
+				BaseCoverage:      []SearchBaseCoverage{},
+				ModelsWithoutBase: 1,
+			},
+		},
+		{
+			name: "no model-level and no versions counts the model without base",
+			body: `{"items":[{}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:          1,
+				BaseCoverage:      []SearchBaseCoverage{},
+				ModelsWithoutBase: 1,
+			},
+		},
+		{
+			name: "unknown mixed-case and whitespace-padded names survive verbatim",
+			body: `{"items":[{"baseModels":["  Pony ","pony","PONY"]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 1,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "  Pony ", Models: 1},
+					{BaseModel: "PONY", Models: 1},
+					{BaseModel: "pony", Models: 1},
+				},
+				ModelsWithMultipleBases: 1,
+			},
+		},
+		{
+			name: "equal counts sort by exact name ascending",
+			body: `{"items":[{"baseModels":["Zeta"]},{"baseModels":["Alpha"]},{"baseModels":["Mid"]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 3,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "Alpha", Models: 1},
+					{BaseModel: "Mid", Models: 1},
+					{BaseModel: "Zeta", Models: 1},
+				},
+			},
+		},
+		{
+			name: "higher counts sort before name order",
+			body: `{"items":[{"baseModels":["Zeta"]},{"baseModels":["Alpha"]},{"baseModels":["Zeta"]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 3,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "Zeta", Models: 2},
+					{BaseModel: "Alpha", Models: 1},
+				},
+			},
+		},
+		{
+			name: "multi-base model increments every distinct base once",
+			body: `{"items":[{"baseModels":["SDXL 1.0","Pony"]},{"baseModels":["Pony"]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 2,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "Pony", Models: 2},
+					{BaseModel: "SDXL 1.0", Models: 1},
+				},
+				ModelsWithMultipleBases: 1,
+			},
+		},
+		{
+			name: "worked reconciliation from the design",
+			body: `{"items":[{"baseModels":["SDXL 1.0","Pony","Pony"]},{"modelVersions":[{"baseModel":"SDXL 1.0"},{"baseModel":"SDXL 1.0"}]},{"baseModels":[],"modelVersions":[{}]}],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned: 3,
+				BaseCoverage: []SearchBaseCoverage{
+					{BaseModel: "SDXL 1.0", Models: 2},
+					{BaseModel: "Pony", Models: 1},
+				},
+				ModelsWithMultipleBases: 1,
+				ModelsWithoutBase:       1,
+			},
+		},
+		{
+			name: "empty items produce zero counters and empty coverage",
+			body: `{"items":[],"metadata":{}}`,
+			want: SearchResultSummary{
+				Returned:     0,
+				BaseCoverage: []SearchBaseCoverage{},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compactEnv, err := ParseCompactModels([]byte(tc.body))
+			if err != nil {
+				t.Fatalf("ParseCompactModels: %v", err)
+			}
+			if !reflect.DeepEqual(compactEnv.Summary, tc.want) {
+				t.Errorf("compact summary = %+v, want %+v", compactEnv.Summary, tc.want)
+			}
+			models, err := ParseModels([]byte(tc.body))
+			if err != nil {
+				t.Fatalf("ParseModels: %v", err)
+			}
+			legacy := SummarizeSearchModels(models)
+			if !reflect.DeepEqual(legacy, tc.want) {
+				t.Errorf("legacy summary = %+v, want %+v", legacy, tc.want)
+			}
+			// Human and compact consumers share one policy core, so the two
+			// projections of the same response must agree exactly.
+			if !reflect.DeepEqual(compactEnv.Summary, legacy) {
+				t.Errorf("compact and legacy summaries disagree:\ncompact: %+v\nlegacy:  %+v", compactEnv.Summary, legacy)
+			}
+		})
+	}
+
+	t.Run("item order does not affect the summary", func(t *testing.T) {
+		forward, err := ParseCompactModels([]byte(`{"items":[{"baseModels":["Zeta","Alpha"]},{"baseModels":["Alpha"]},{"baseModels":["Mid"]}],"metadata":{}}`))
+		if err != nil {
+			t.Fatalf("forward parse: %v", err)
+		}
+		permuted, err := ParseCompactModels([]byte(`{"items":[{"baseModels":["Mid"]},{"baseModels":["Alpha"]},{"baseModels":["Alpha","Zeta"]}],"metadata":{}}`))
+		if err != nil {
+			t.Fatalf("permuted parse: %v", err)
+		}
+		if !reflect.DeepEqual(forward.Summary, permuted.Summary) {
+			t.Errorf("summary depends on input order:\nforward:  %+v\npermuted: %+v", forward.Summary, permuted.Summary)
+		}
+	})
+}
+
+func TestCompactSearch_RequiredKeys(t *testing.T) {
+	env, err := ParseCompactModels([]byte(`{"items":[{"id":7}],"metadata":{}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(compactMarshal(t, env), &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"schemaVersion", "kind", "items", "summary"} {
+		if _, ok := envelope[key]; !ok {
+			t.Errorf("required key %q missing from search envelope", key)
+		}
+	}
+	var summary map[string]json.RawMessage
+	if err := json.Unmarshal(envelope["summary"], &summary); err != nil {
+		t.Fatalf("unmarshal summary: %v", err)
+	}
+	for _, key := range []string{"returned", "baseCoverage", "modelsWithMultipleBases", "modelsWithoutBase"} {
+		if _, ok := summary[key]; !ok {
+			t.Errorf("required key %q missing from search summary", key)
+		}
+	}
+	if string(summary["returned"]) != "1" {
+		t.Errorf("returned = %s, want 1", summary["returned"])
+	}
+	// No observed base evidence: coverage must serialize as [], never null,
+	// and no zero-count named category may be fabricated.
+	if string(summary["baseCoverage"]) != "[]" {
+		t.Errorf("baseCoverage = %s, want []", summary["baseCoverage"])
+	}
+	if string(summary["modelsWithMultipleBases"]) != "0" || string(summary["modelsWithoutBase"]) != "1" {
+		t.Errorf("counters = %s/%s, want 0/1", summary["modelsWithMultipleBases"], summary["modelsWithoutBase"])
 	}
 }
 
@@ -663,9 +913,18 @@ func TestCompactModels_EnvelopeErrors(t *testing.T) {
 	if env.Items == nil || len(env.Items) != 0 {
 		t.Errorf("items = %v, want supplied []", env.Items)
 	}
+	// An empty page still carries the full summary contract: returned 0,
+	// coverage [], and explicit zero counters — never a cursor-derived total.
+	wantEmpty := SearchResultSummary{Returned: 0, BaseCoverage: []SearchBaseCoverage{}}
+	if !reflect.DeepEqual(env.Summary, wantEmpty) {
+		t.Errorf("empty summary = %+v, want %+v", env.Summary, wantEmpty)
+	}
 	out := string(compactMarshal(t, env))
 	if strings.Contains(out, "nextCursor") || !strings.Contains(out, `"items":[]`) {
 		t.Errorf("output must be %s with empty items and no metadata echo, got %s", CompactSearchSchemaVersion, out)
+	}
+	if !strings.Contains(out, `"baseCoverage":[]`) {
+		t.Errorf("empty coverage must serialize as [], got %s", out)
 	}
 }
 
@@ -696,6 +955,14 @@ func TestCompact_DeterministicRepeat(t *testing.T) {
 			}
 			if a, b := string(compactMarshal(t, first)), string(compactMarshal(t, second)); a != b {
 				t.Errorf("repeated projection differs:\n%s\n%s", a, b)
+			}
+			// The summary is part of the repeated projection and must be
+			// just as deterministic (map iteration must not leak).
+			if s1, ok := first.(*CompactSearchEnvelope); ok {
+				s2 := second.(*CompactSearchEnvelope)
+				if !reflect.DeepEqual(s1.Summary, s2.Summary) {
+					t.Errorf("repeated summary differs:\n%+v\n%+v", s1.Summary, s2.Summary)
+				}
 			}
 		})
 	}
@@ -733,6 +1000,18 @@ func TestCompact_SizeAndRecordPreservation(t *testing.T) {
 		}
 		if wantVersions != 11 {
 			t.Errorf("version refs = %d, want all 11 embedded versions (8+3)", wantVersions)
+		}
+		// The summary describes exactly the records above: returned equals
+		// the item count and every observed fixture base is covered once.
+		if env.Summary.Returned != len(source.Items) {
+			t.Errorf("summary returned = %d, want %d", env.Summary.Returned, len(source.Items))
+		}
+		wantCoverage := []SearchBaseCoverage{
+			{BaseModel: "Anima", Models: 1},
+			{BaseModel: "SDXL 1.0", Models: 1},
+		}
+		if !reflect.DeepEqual(env.Summary.BaseCoverage, wantCoverage) {
+			t.Errorf("summary coverage = %+v, want %+v", env.Summary.BaseCoverage, wantCoverage)
 		}
 	})
 

@@ -273,6 +273,23 @@ CREATOR`). `--json` defaults to the compact `civ.search/v1` envelope
 every version reference). `--view full` restores the legacy raw API `items`
 array byte-for-byte; see [API notes](#api-notes).
 
+When human search stdout is piped or redirected, model NAME values are
+written in full; interactive consoles retain width-based truncation, and the
+other columns keep their existing limits. A failed console-width query uses
+the same full-NAME fallback. JSON output is unchanged.
+
+Both human and compact output end with a local summary of the returned page:
+`returned` (this response's item count — never a match total, cursor, or
+next-page estimate), non-exclusive `baseCoverage` (each distinct observed base
+counts at most once per model, so coverage counts need not sum to `returned`),
+and explicit `modelsWithMultipleBases` / `modelsWithoutBase` counters.
+Model-level `baseModels` is the evidence source; only when it has no usable
+value does the summary fall back to distinct bases across all embedded
+versions. No primary base, percentage, or family inference is added. The
+human footer shows at most eight base categories (`+K more (use --json for
+all)` when more exist); compact JSON always carries the full sorted list under
+`summary`.
+
 ### `civ show <modelId>` — inspect a model
 
 ```bash
@@ -309,6 +326,7 @@ civ recipe 3263843 --examples 0       # selection counts only, examples: []
 civ recipe 3263843 --example 1        # singular detail: that example's prompt text
 civ recipe 3263843 --source community --limit 10
 civ recipe 3263843 --source community --sort newest --json
+civ recipe 3263843 --source community --stack-summary --json  # aggregate stack view
 civ recipe image 123456 --json        # one exact community image detail
 ```
 
@@ -319,23 +337,42 @@ civ recipe image 123456 --json        # one exact community image detail
 | `--source <s>` | `official` | `official` (one `GET /model-versions/{id}` request, never `/images`) or `community` (one bounded `GET /images` sample). Combining both is not supported. |
 | `--limit <n>` | `20` | Community sample size, **1–100**. Ignored by the official source. |
 | `--sort <s>` | `most-reactions` | Community order: `most-reactions` (fixed `period=AllTime`) or `newest` (case-insensitive; the API spelling `Most Reactions` is accepted). Rejected with the official source. |
+| `--stack-summary` | off | Community source only: replace per-image observations with descriptive aggregates (resource stacks, parameter distributions, text availability) computed from the same single bounded response. Rejected with the official source and with `recipe image`. |
 
 The community source performs exactly one bounded `GET /images` request
 (`modelVersionId`, `withMeta=true`, `type=image`, `limit`, `sort`,
-`period=AllTime`; no page/cursor/NSFW overrides) and returns per-image
-observations only (image/post/user provenance, original order, reactions,
-normalized parameters, resource stacks, and coverage counts) — no aggregation,
-frequency table, ranking, quality score, or recommendation. Coverage counts
-`returned`/`withMeta`/`usable` describe this one response; a continuation is
-reported but never followed, and an empty sample is a visibility outcome, not
-proof the version has no images. `civ recipe image <imageId>` performs exactly
-one `imageId`+`withMeta=true`+`type=image`+`limit=1` request and returns only
-that image's selected detail; it never reuses list state or fetches other
-images.
+`period=AllTime`; no page/cursor/NSFW overrides). The default view returns
+per-image observations only (image/post/user provenance, original order,
+reactions, normalized parameters, resource stacks, and coverage counts) — no
+aggregation, frequency table, ranking, quality score, or recommendation.
+Coverage counts `returned`/`withMeta`/`usable` describe this one response; a
+continuation is reported but never followed, and an empty sample is a
+visibility outcome, not proof the version has no images.
+
+`--source community --stack-summary` keeps that same single request and
+instead emits descriptive aggregates (`kind: "communityStackSummary"`, fixed
+top 5 per group, remaining identities/values folded into `other`): resource
+usage counted by distinct images (a repeated entry on one image counts once;
+identity is modelVersionId, else hash, else name, with no cross-basis merging;
+unidentified entries are counted without inventing a row, and unknown types
+stay verbatim), per-LoRA valid-weight medians with sample/image coverage
+(duplicate weights on one image count once; invalid weights are excluded, and
+nothing is defaulted or clamped), four parameter distributions
+(steps/cfgScale/sampler/scheduler) with an explicit `observedImages`
+denominator per field, and prompt/negative-prompt availability as status
+counts with exact rates (null when the sample is empty). The aggregate never
+emits prompt text, raw metadata, workflows, media URLs, per-image
+observations, or cursor/continuation values. The sample is bounded,
+non-random, and visibility-biased: aggregates are evidence to inspect, not
+recommended, stable, best, or reproducible settings. `civ recipe image
+<imageId>` performs exactly one `imageId`+`withMeta=true`+`type=image`+`limit=1`
+request and returns only that image's selected detail; it never reuses list
+state or fetches other images.
 
 JSON schemas are versioned as `civ.recipe/v1` (`kind: "recipeSummary"` or
-`"recipeExampleDetail"` for the official source; `"communityRecipeSample"` or
-`"communityImageDetail"` for the community views). Known numeric fields share
+`"recipeExampleDetail"` for the official source; `"communityRecipeSample"`,
+`"communityStackSummary"`, or `"communityImageDetail"` for the community
+views). Known numeric fields share
 one normalizer: numeric
 `20` and string `"20"` become the same JSON number, LoRA weights normalize the
 same way, seeds stay exact decimal strings, and missing/null stays null while
@@ -423,8 +460,24 @@ model/version/creator, trigger words, files with full SHA256/AutoV2 and
 pickle/virus scan results, license grants, and example-image counts.
 
 Exit codes: `0` hit, `3` hash not registered (404), `1` usage error, `2` network
-failure, `4` rejected token. `--json` emits `{hash, version, model, examples}`
-(`model` is null if the owning-model fetch degraded).
+failure, `4` rejected token. `--json` emits `{hash, version, model,
+latestPublished, examples}` (`model` is null if the owning-model fetch
+degraded); `vet --prompts --json` stays the focused `{prompts, skipped}`
+recipe view.
+
+Normal reports add one informational `LATEST` line (and the `latestPublished`
+JSON block) describing the latest **published visible** version in the owning
+model's response: the unique maximum valid RFC3339 `publishedAt` instant,
+plus the vetted version's relationship (`currentLatest` / `newerPublished` /
+`tiedLatest` / `unknown`) and an exact, case-sensitive base-model comparison
+(`changed` / `unchanged` / `unknown`). Ties report sorted tied IDs without
+picking a winner; a missing or malformed timestamp on any visible version
+makes the latest claim explicitly unknown instead of guessing; if the vetted
+version is absent from the visible list, the relationship is unknown while
+the latest identity may still be reported. The context reuses the
+owning-model response vet already fetches — no extra request — and it is
+descriptive only: never an upgrade recommendation, outdated verdict, or trend
+claim.
 
 ### `civ sync <dir>` — batch-audit a directory
 

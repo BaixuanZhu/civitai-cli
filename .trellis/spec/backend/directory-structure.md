@@ -50,6 +50,7 @@ civitai-cli/
 │   │   ├── recipe.go       #   official recipe summary/detail + shared scalar normalizer
 │   │   ├── images.go       #   bounded GET /images list + exact-image detail
 │   │   ├── community.go    #   community recipe sample/detail projection
+│   │   ├── community_stack.go  # community stack aggregate projection (communityStackSummary)
 │   │   └── compare.go      #   presence-aware model/version/file comparison snapshots
 │   ├── resolver/           # pure readiness policy: ref grammar, evidence correlation, report
 │   │   ├── types.go policy.go resolve.go
@@ -60,7 +61,7 @@ civitai-cli/
 │   │   │                   #   exitCodeFor, printErrorHint, permuteArgs, newAPIClient seam
 │   │   ├── help.go         #   per-command help pages: globalHelpBlock, writeCommandHelp,
 │   │   │                   #   isBareHelp (stdout + exit 0 for `civ <cmd> help` / -h)
-│   │   ├── search.go show.go recipe.go resolve.go compare.go vet.go sync.go tags.go login.go prompts.go skill.go proxy.go
+│   │   ├── search.go show.go recipe.go recipe_stack.go resolve.go compare.go vet.go vet_latest.go sync.go tags.go login.go prompts.go skill.go proxy.go
 │   ├── config/             # leaf: token + scoped proxy persistence, priority resolution
 │   │   └── config.go       #   token + scoped proxy slots (proxy, githubProxy); Path/Load/Save/Delete, ResolveToken/ResolveProxy(ResolveGithubProxy)
 │   ├── proxy/              # leaf: outbound proxy validate/resolve/transport

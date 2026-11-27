@@ -110,6 +110,7 @@ var completionSpec = []completionCommandSpec{
 		{"source", []string{"official", "community"}},
 		{"sort", []string{"most-reactions", "newest"}},
 		{"limit", nil},
+		{"stack-summary", nil},
 	}},
 	{"resolve", nil},
 	{"compare", []completionFlagSpec{
