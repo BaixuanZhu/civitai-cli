@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check architecture, output-schema compatibility, detail redaction, and command help consistency across child deliveries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify expected failures, zero-request validation, integration parity, zero dependencies, and the complete offline gate."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify stdout-only results and stderr-only diagnostics in all new output paths."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check shared aggregation/rendering helpers for duplication without introducing cross-child coupling."}

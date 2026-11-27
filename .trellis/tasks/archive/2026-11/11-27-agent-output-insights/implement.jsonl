@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/index.md","reason":"Route parent integration work through the CLI backend contracts and required guides."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Preserve command boundaries, versioned output projections, redaction, and shared rendering conventions across four children."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply zero-dependency, expected-failure, request-count, integration-coverage, and full quality-gate requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review derived data contracts from API responses through pure projections to human and JSON consumers."}

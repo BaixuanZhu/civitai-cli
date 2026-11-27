@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend contract index for the standard-library-only, English, offline-testable Go CLI conventions that govern this feature."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Required package boundaries, pure command cores, sanctioned seams, versioned machine envelopes, and DTO-level large-field redaction for the new aggregate view."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Placement and dependency direction for the API aggregation module, command adapter, renderer, tests, and existing Client.Get/ListImages reuse."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"GoDoc, zero dependencies, offline httptest coverage, mandatory expected-failure cases, integration parity, and vet/test/race release gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Pre-network usage validation, existing API error classes and exit mappings, stderr diagnostics, and clean stdout on failed decode/request paths."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Stdout-only result discipline and prohibition on prompt, response, token, or diagnostic leakage in human and JSON output."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Guides reuse of ListImages, ParseCommunitySample, scalar normalizers, status classifiers, and existing test helpers instead of duplicate contract logic."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Defines the raw-response to normalized observation to aggregate DTO to renderer boundary and the need for explicit drift and zero-denominator behavior."}

@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Route implementation through the Go CLI backend contracts and required quality guidance."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Keep vet orchestration and output additive, evaluate derived facts in one pure core, and preserve stable JSON and stdout contracts."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Place the vet-local helper and tests in the command layer while reusing existing API DTOs, client seams, fixtures, and report primitives."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve by-hash source of truth, vet exit codes, and successful-hit degradation when the existing owning-model fetch fails."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply standard-library-only GoDoc, offline table/httptest success and expected-failure coverage, request-count assertions, race checks, and integration handoff."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Keep the additive result on stdout, retain existing model-degradation warnings on stderr, and avoid extra data-quality log noise."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Preserve current/latest identity, timestamp, missing, tied, and base states consistently from decoded API data through human and JSON output."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Evaluate the existing search/compare latest helpers and shared prompt/report paths before adding the narrowly scoped vet projection."}

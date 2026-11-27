@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Quality-review entry point for the backend architecture, language, dependency, offline-test, and reproducibility contracts."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Check cohesion, dependency direction, unchanged public contracts, versioned kind/schema use, and structural exclusion of large fields from summary DTOs."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify the new API and command files preserve layering, consumer-side seams, test placement, and the single outbound HTTP choke point."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check table-driven success and failure coverage, request-count assertions, CLI integration parity, GoDoc, zero dependencies, and full vet/test/race gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify invalid combinations fail before network with empty stdout while API, auth, network, and decode failures retain existing exit semantics."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify stdout carries only the selected aggregate result and no warnings, prompt text, raw response data, or diagnostics contaminate JSON/human output."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review for duplicated query, normalization, prompt-status, coverage, resource identity, or rendering logic that should reuse existing owners."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check field survival and absence semantics across raw JSON, normalized observations, aggregate counts/medians/rates, and both renderers."}

@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Entry point for reviewing the change against the Go CLI's actual backend contracts and quality gates."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Checks that output-mode detection and rendering stay in the correct packages without new global state, API coupling, or unrelated command changes."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verifies Windows/non-Windows file placement, consumer-side seams, and the limited report/cmd change boundary."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Provides the required success/failure test matrix, zero-request/no-stdout checks, integration-surface rule, zero-dependency check, and vet/test/race/build gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Checks that validation and rendering failures retain existing exit and stdout behavior and that width fallback is not misclassified as a fatal error."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verifies clean result-only stdout and no new warning or diagnostic leakage on console-query failure."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Checks reuse of console.IsTerminal, searchLayout, Truncate, and NewTableWriter instead of parallel implementations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Supports review of the actual-writer mode contract, human/JSON separation, and preservation of the dependency task's summary footer."}

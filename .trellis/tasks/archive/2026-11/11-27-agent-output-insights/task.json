@@ -1,0 +1,31 @@
+{
+  "id": "agent-output-insights",
+  "name": "agent-output-insights",
+  "title": "Agent-oriented CLI output insights",
+  "description": "Deliver bounded, machine-readable local aggregations and inspection improvements for recipe, search, non-TTY output, and vet without downloads or implicit version selection.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "zz",
+  "assignee": "zz",
+  "createdAt": "2026-11-27",
+  "completedAt": "2026-11-27",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-27-community-stack-summary",
+    "11-27-search-base-model-summary",
+    "11-27-non-tty-search-names",
+    "11-27-vet-latest-version-context"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

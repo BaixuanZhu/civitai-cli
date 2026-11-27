@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"Entry point for the Go CLI's zero-dependency, offline-testable backend contracts and the relevant guideline set."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Defines report/cmd cohesion, writer and function-value seams, terminal UI precedent, pure rendering, and the prohibition on unnecessary mutable globals."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Places width probing in report platform files and search orchestration in cmd while preserving dependency direction and platform-suffix conventions."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Requires zero third-party modules, GoDoc, deterministic unit tests, invalid-input/no-stdout coverage, cross-platform compilation, integration parity, and the full validation gate."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Protects stdout-only results and confirms that console-query fallback must not introduce diagnostic stdout or unnecessary warnings."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Directs reuse of the existing console.IsTerminal facility and searchLayout/Truncate primitives instead of duplicating platform or layout logic."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Guides the writer-to-platform-to-renderer contract and preservation of JSON, validation, and summary-footer boundaries."}

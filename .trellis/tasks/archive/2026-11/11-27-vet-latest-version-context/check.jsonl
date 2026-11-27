@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Locate the complete backend quality checklist for the final scoped review."}
+{"file":".trellis/spec/backend/design-principles.md","reason":"Verify one pure derivation feeds both normal renderers, no renderer invents selection semantics, and additive JSON remains compatible."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Check command-layer cohesion, existing API/fixture reuse, test placement, and absence of cross-package or sync expansion."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Audit model-fetch degradation, existing warnings, by-hash exit 3, successful vet hits, and no extra retry/request behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify deterministic offline success/expected-failure tests, exact request counts, focused compatibility, integration parity, zero dependencies, and the full quality gate."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify stdout-only results and no new stdout diagnostics or unnecessary warnings for explicit unknown/tied report states."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit unknown, missing, empty, malformed, tied, current-absent, and nullable-base evidence across the complete human and JSON contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated latest/base logic across renderers and confirm existing helpers were neither misused nor needlessly changed."}

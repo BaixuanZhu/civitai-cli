@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/design-principles.md","reason":"Review additive schema discipline, exact legacy full-view behavior, stable public contracts, and correct package ownership."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check offline success and expected-failure coverage, output-shape integration handoff, GoDoc, zero dependencies, and required validation gates."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify stdout contains only the selected result and no summary text contaminates JSON or diagnostics move to stdout."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Confirm both output modes share one base-evidence and counting implementation rather than drifting duplicate logic."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check that returned counts, fallback evidence, deduplication, ordering, and empty states survive every projection boundary consistently."}
